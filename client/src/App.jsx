@@ -20,10 +20,10 @@ async function accountRequest(path, options = {}) {
   return data
 }
 
-async function accountMutation(path, body) {
+async function accountMutation(path, body, method = 'POST') {
   const { csrfToken } = await accountRequest('/api/auth/csrf')
   return accountRequest(path, {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
     body: JSON.stringify(body),
   })
@@ -92,7 +92,151 @@ function MyBookings({ refreshKey }) {
   )
 }
 
+function AdminDashboard({ onBusyChange }) {
+  const [view, setView] = useState({ page: 1, status: '' })
+  const [attempt, setAttempt] = useState(0)
+  const [result, setResult] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [busyId, setBusyId] = useState(null)
+  const updating = useRef(false)
+  const mounted = useRef(false)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    async function load() {
+      setLoading(true)
+      setResult(null)
+      setError('')
+      try {
+        const query = new URLSearchParams({ page: String(view.page), limit: '20' })
+        if (view.status) query.set('status', view.status)
+        const data = await accountRequest(`/api/admin/bookings?${query}`, { signal: controller.signal })
+        if (!Array.isArray(data.bookings)) throw new Error('Invalid admin booking response.')
+        if (!controller.signal.aborted) setResult(data)
+      } catch (failure) {
+        if (!controller.signal.aborted) setError(failure.status === 401
+          ? 'Your session expired. Sign out and sign in again.'
+          : failure.status === 403 ? 'An administrator account is required.' : failure.message)
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    }
+    load()
+    return () => controller.abort()
+  }, [view, attempt])
+
+  async function changeStatus(booking, status) {
+    if (updating.current) return
+    updating.current = true
+    setBusyId(booking.id)
+    onBusyChange(true)
+    setError('')
+    setMessage('')
+    try {
+      const data = await accountMutation(`/api/admin/bookings/${booking.id}/status`, {
+        status, expectedVersion: booking.version,
+      }, 'PATCH')
+      if (!data.booking?.id) throw new Error('Incomplete booking update response.')
+      if (mounted.current) {
+        setMessage(`Booking ${booking.id} is now ${data.booking.status}.`)
+        setAttempt((value) => value + 1)
+      }
+    } catch (failure) {
+      if (mounted.current) {
+        setError(failure.status === 409
+          ? 'This booking changed elsewhere. Refresh bookings before trying again.'
+          : failure.status === 401 ? 'Your session expired. Sign out and sign in again.'
+          : failure.status ? failure.message
+          : 'The update result could not be confirmed. Refresh bookings to check its status before trying again.')
+        // Hide stale action buttons until the administrator reloads the list.
+        setResult(null)
+      }
+    } finally {
+      updating.current = false
+      if (mounted.current) {
+        setBusyId(null)
+        onBusyChange(false)
+      }
+    }
+  }
+
+  const actions = { pending: ['confirmed', 'cancelled'], confirmed: ['completed', 'cancelled'] }
+  const labels = { confirmed: 'Confirm booking', completed: 'Mark completed', cancelled: 'Cancel booking' }
+
+  return (
+    <section id="admin" className="mt-14 scroll-mt-6 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold">Admin dashboard</h2>
+          <p className="mt-2 text-slate-600">Review cleaning requests and update their status.</p>
+        </div>
+        <button type="button" disabled={loading || Boolean(busyId)} onClick={() => { setMessage(''); setAttempt((value) => value + 1) }} className="rounded-lg border px-4 py-2 disabled:opacity-50">Refresh bookings</button>
+      </div>
+      <label htmlFor="admin-status" className="mt-6 block max-w-xs font-medium">
+        Filter by status
+        <select id="admin-status" value={view.status} disabled={Boolean(busyId)} onChange={(event) => { setMessage(''); setView({ page: 1, status: event.target.value }) }} className={inputStyle}>
+          <option value="">All statuses</option>
+          {['pending', 'confirmed', 'completed', 'cancelled'].map((status) => <option key={status} value={status}>{status[0].toUpperCase() + status.slice(1)}</option>)}
+        </select>
+      </label>
+      <p className="mt-3 text-sm text-slate-500">All times below use your device’s local time zone.</p>
+      {message && <p role="status" className="mt-4 rounded-lg bg-teal-50 p-3 break-words text-teal-800">{message}</p>}
+      {error && <p role="alert" className="mt-4 text-red-700">{error}</p>}
+      {loading && <p role="status" className="mt-4">Loading bookings…</p>}
+      {!loading && result && (
+        <>
+          {result.bookings.length === 0 && <p className="mt-5 text-slate-600">No bookings found on this page.</p>}
+          <div className="mt-5 space-y-5">
+            {result.bookings.map((booking) => (
+              <article key={booking.id} className="rounded-xl border border-slate-200 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-lg font-semibold">{booking.serviceNameSnapshot}</h3>
+                  <span className="rounded-full bg-teal-50 px-3 py-1 text-sm capitalize text-teal-900">{booking.status}</span>
+                </div>
+                <p className="mt-3">Preferred time: {new Date(booking.preferredAt).toLocaleString()}</p>
+                <p className="mt-2 whitespace-pre-wrap break-words">Address: {booking.address}</p>
+                {booking.notes && <p className="mt-2 whitespace-pre-wrap break-words text-slate-600">Instructions: {booking.notes}</p>}
+                <p className="mt-3 break-all text-xs text-slate-500">Customer ID: {booking.customerId}</p>
+                <p className="mt-1 break-all text-xs text-slate-500">Reference: {booking.id}</p>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  {(actions[booking.status] || []).map((status) => (
+                    <button key={status} type="button" disabled={Boolean(busyId)} onClick={() => changeStatus(booking, status)} className={`rounded-lg px-4 py-2 font-medium disabled:opacity-50 ${status === 'cancelled' ? 'border border-red-300 text-red-700 hover:bg-red-50' : 'bg-teal-700 text-white hover:bg-teal-800'}`}>
+                      {busyId === booking.id ? 'Updating…' : labels[status]}
+                    </button>
+                  ))}
+                  {!actions[booking.status] && <p className="text-sm text-slate-500">This booking is closed.</p>}
+                </div>
+                {booking.statusHistory?.length > 0 && (
+                  <details className="mt-4 text-sm text-slate-600">
+                    <summary className="cursor-pointer font-medium">Status history</summary>
+                    <ol className="mt-2 space-y-2">
+                      {booking.statusHistory.map((entry, index) => <li key={index} className="capitalize">{entry.status} · {new Date(entry.changedAt).toLocaleString()}</li>)}
+                    </ol>
+                  </details>
+                )}
+              </article>
+            ))}
+          </div>
+          <div className="mt-6 flex flex-wrap items-center gap-4">
+            <button type="button" disabled={view.page === 1 || Boolean(busyId)} onClick={() => setView((previous) => ({ ...previous, page: previous.page - 1 }))} className="rounded-lg border px-4 py-2 disabled:opacity-40">Previous</button>
+            <span>Page {view.page}</span>
+            <button type="button" disabled={!result.hasMore || Boolean(busyId)} onClick={() => setView((previous) => ({ ...previous, page: previous.page + 1 }))} className="rounded-lg border px-4 py-2 disabled:opacity-40">Next</button>
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
 export default function App() {
+  const [adminBusy, setAdminBusy] = useState(false)
   const [user, setUser] = useState(null)
   const [bookingBusy, setBookingBusy] = useState(false)
   const [bookingError, setBookingError] = useState('')
@@ -147,7 +291,7 @@ export default function App() {
 
   async function submitAccount(event) {
     event.preventDefault()
-    if (authBusy || submittingBooking.current) return
+    if (authBusy || adminBusy || submittingBooking.current) return
     const registering = authMode === 'register'
     const fields = {}
     if (registering && (account.name.trim().length < 2 || account.name.trim().length > 100)) {
@@ -185,7 +329,7 @@ export default function App() {
   }
 
   async function logout() {
-    if (authBusy || submittingBooking.current) return
+    if (authBusy || adminBusy || submittingBooking.current) return
     setAuthBusy(true)
     setAuthError('')
     setAuthMessage('')
@@ -396,6 +540,7 @@ export default function App() {
           <div className="flex flex-wrap gap-6 text-sm font-medium">
             <a href="#account" className="hover:text-teal-700">{user ? 'My account' : 'Sign in / Register'}</a>
             {user?.role === 'customer' && <a href="#my-bookings" className="hover:text-teal-700">My Bookings</a>}
+            {user?.role === 'admin' && <a href="#admin" className="hover:text-teal-700">Admin dashboard</a>}
             <a href="#services" className="hover:text-teal-700">
               Services
             </a>
@@ -433,18 +578,18 @@ export default function App() {
             <div className="mt-4">
               <p className="text-slate-700">Signed in as <strong>{user.name}</strong></p>
               <p className="mt-1 break-words text-sm text-slate-600">{user.email} · {user.role}</p>
-              <button type="button" disabled={authBusy || bookingBusy} onClick={logout} className="mt-5 rounded-xl border border-slate-300 px-5 py-3 font-medium disabled:opacity-50">
+              <button type="button" disabled={authBusy || bookingBusy || adminBusy} onClick={logout} className="mt-5 rounded-xl border border-slate-300 px-5 py-3 font-medium disabled:opacity-50">
                 {authBusy ? 'Signing out…' : 'Sign out'}
               </button>
             </div>
           ) : (
             <>
               <div className="mt-5 flex gap-3" aria-label="Account options">
-                <button type="button" disabled={authBusy || bookingBusy} aria-pressed={authMode === 'login'} onClick={() => changeAuthMode('login')} className={`rounded-lg px-4 py-2 ${authMode === 'login' ? 'bg-teal-700 text-white' : 'bg-slate-100'}`}>Sign in</button>
-                <button type="button" disabled={authBusy || bookingBusy} aria-pressed={authMode === 'register'} onClick={() => changeAuthMode('register')} className={`rounded-lg px-4 py-2 ${authMode === 'register' ? 'bg-teal-700 text-white' : 'bg-slate-100'}`}>Register</button>
+                <button type="button" disabled={authBusy || bookingBusy || adminBusy} aria-pressed={authMode === 'login'} onClick={() => changeAuthMode('login')} className={`rounded-lg px-4 py-2 ${authMode === 'login' ? 'bg-teal-700 text-white' : 'bg-slate-100'}`}>Sign in</button>
+                <button type="button" disabled={authBusy || bookingBusy || adminBusy} aria-pressed={authMode === 'register'} onClick={() => changeAuthMode('register')} className={`rounded-lg px-4 py-2 ${authMode === 'register' ? 'bg-teal-700 text-white' : 'bg-slate-100'}`}>Register</button>
               </div>
               <form onSubmit={submitAccount} noValidate className="mt-6 max-w-lg space-y-5">
-                <fieldset disabled={authBusy || bookingBusy} className="space-y-5">
+                <fieldset disabled={authBusy || bookingBusy || adminBusy} className="space-y-5">
                   <legend className="sr-only">{authMode === 'register' ? 'Create an account' : 'Sign in to your account'}</legend>
                   {(authMode === 'register' ? ['name', 'email', 'password'] : ['email', 'password']).map((name) => (
                     <div key={name}>
@@ -464,6 +609,8 @@ export default function App() {
           {authError && <p role="alert" className="mt-4 text-red-700">{authError}</p>}
           {authMessage && <p role="status" className="mt-4 text-teal-800">{authMessage}</p>}
         </section>
+
+        {user?.role === 'admin' && <AdminDashboard key={user.id} onBusyChange={setAdminBusy} />}
 
         <section id="services" className="mt-14 scroll-mt-6">
           <h2 className="text-2xl font-bold">Our services</h2>

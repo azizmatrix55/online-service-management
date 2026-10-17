@@ -541,6 +541,128 @@ async function startServer() {
       }
     })
 
+    async function requireAdmin(req, res, next) {
+      res.set('Cache-Control', 'no-store')
+      try {
+        if (!req.session.userId) {
+          return res.status(401).json({ code: 'AUTH_REQUIRED', message: 'Please sign in.' })
+        }
+        const user = await User.findById(req.session.userId).select('_id role').lean()
+        if (!user) {
+          await sessionAction(req, 'destroy')
+          res.clearCookie(cookieName, cookieOptions)
+          return res.status(401).json({ code: 'AUTH_REQUIRED', message: 'Please sign in again.' })
+        }
+        if (user.role !== 'admin') {
+          return res.status(403).json({ code: 'ADMIN_REQUIRED', message: 'Administrator access is required.' })
+        }
+        req.adminId = user._id
+        next()
+      } catch (error) {
+        next(error)
+      }
+    }
+
+    function adminBooking(booking) {
+      return {
+        ...publicBooking(booking),
+        customerId: booking.customerId.toString(),
+        version: booking.__v,
+        statusHistory: booking.statusHistory,
+      }
+    }
+
+    app.get('/api/admin/bookings', requireAdmin, async (req, res, next) => {
+      try {
+        const allowed = ['page', 'limit', 'status', 'from', 'to']
+        if (Object.keys(req.query).some((key) => !allowed.includes(key))) {
+          return res.status(400).json({ code: 'INVALID_QUERY', message: 'Unsupported filter.' })
+        }
+        const pageText = req.query.page === undefined ? '1' : req.query.page
+        const limitText = req.query.limit === undefined ? '20' : req.query.limit
+        const positiveInteger = (value) => typeof value === 'string' && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value))
+        if (!positiveInteger(pageText) || !positiveInteger(limitText) || Number(limitText) > 100 ||
+            !Number.isSafeInteger((Number(pageText) - 1) * Number(limitText))) {
+          return res.status(400).json({ code: 'INVALID_QUERY', message: 'Use a positive page number and a limit of 1–100.' })
+        }
+        const filter = {}
+        if (req.query.status !== undefined) {
+          if (typeof req.query.status !== 'string' || !['pending', 'confirmed', 'completed', 'cancelled'].includes(req.query.status)) {
+            return res.status(400).json({ code: 'INVALID_QUERY', message: 'Invalid status filter.' })
+          }
+          filter.status = req.query.status
+        }
+        for (const name of ['from', 'to']) {
+          if (req.query[name] !== undefined) {
+            const value = req.query[name]
+            const date = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? new Date(value) : null
+            if (!date || !Number.isFinite(date.getTime())) {
+              return res.status(400).json({ code: 'INVALID_QUERY', message: 'Date filters must be ISO timestamps with a time zone.' })
+            }
+            filter.preferredAt ||= {}
+            filter.preferredAt[name === 'from' ? '$gte' : '$lte'] = date
+          }
+        }
+        if (filter.preferredAt?.$gte && filter.preferredAt?.$lte && filter.preferredAt.$gte > filter.preferredAt.$lte) {
+          return res.status(400).json({ code: 'INVALID_QUERY', message: 'The start date must not follow the end date.' })
+        }
+        const page = Number(pageText)
+        const limit = Number(limitText)
+        const bookings = await Booking.find(filter)
+          .sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit + 1).lean()
+        res.json({ bookings: bookings.slice(0, limit).map(adminBooking), page, limit, hasMore: bookings.length > limit })
+      } catch (error) {
+        next(error)
+      }
+    })
+
+    app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res, next) => {
+      try {
+        if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
+          return res.status(404).json({ code: 'NOT_FOUND', message: 'Booking not found.' })
+        }
+        const body = req.body
+        if (!body || typeof body !== 'object' || Array.isArray(body) ||
+            Object.keys(body).some((key) => !['status', 'expectedVersion'].includes(key)) ||
+            !['pending', 'confirmed', 'completed', 'cancelled'].includes(body.status) ||
+            !Number.isSafeInteger(body.expectedVersion) || body.expectedVersion < 0) {
+          return res.status(400).json({ code: 'VALIDATION_FAILED', message: 'Provide a valid status and expectedVersion.' })
+        }
+        const current = await Booking.findById(req.params.id).lean()
+        if (!current) {
+          return res.status(404).json({ code: 'NOT_FOUND', message: 'Booking not found.' })
+        }
+        if (current.__v !== body.expectedVersion) {
+          return res.status(409).json({ code: 'BOOKING_CONFLICT', message: 'This booking changed. Refresh before updating it.' })
+        }
+        const transitions = {
+          pending: ['confirmed', 'cancelled'],
+          confirmed: ['completed', 'cancelled'],
+          completed: [],
+          cancelled: [],
+        }
+        if (!transitions[current.status]?.includes(body.status)) {
+          return res.status(400).json({ code: 'INVALID_TRANSITION', message: `Cannot change ${current.status} to ${body.status}.` })
+        }
+        // Match the version and status in the write itself, preventing lost updates.
+        const updated = await Booking.findOneAndUpdate(
+          { _id: current._id, __v: body.expectedVersion, status: current.status },
+          {
+            $set: { status: body.status },
+            $inc: { __v: 1 },
+            $push: { statusHistory: { status: body.status, changedBy: req.adminId, changedAt: new Date() } },
+          },
+          { new: true, runValidators: true },
+        ).lean()
+        if (!updated) {
+          return res.status(409).json({ code: 'BOOKING_CONFLICT', message: 'This booking changed. Refresh before updating it.' })
+        }
+        res.json({ booking: adminBooking(updated) })
+      } catch (error) {
+        next(error)
+      }
+    })
+
     app.use('/api', (req, res) => {
       res.status(404).json({
         code: 'NOT_FOUND',
