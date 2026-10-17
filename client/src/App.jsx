@@ -1,9 +1,214 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import logo from './assets/sweeplune-logo.png'
 
 const inputStyle =
   'mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/20'
 
+async function accountRequest(path, options = {}) {
+  const response = await fetch(path, { credentials: 'same-origin', ...options })
+  let data
+  try { data = await response.json() } catch {
+    throw new Error('The server returned an unreadable response. Please check your connection.')
+  }
+  if (!response.ok) {
+    const error = new Error(data.message || 'Account request failed.')
+    error.status = response.status
+    error.code = data.code
+    error.fields = data.fields || {}
+    throw error
+  }
+  return data
+}
+
+async function accountMutation(path, body) {
+  const { csrfToken } = await accountRequest('/api/auth/csrf')
+  return accountRequest(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+    body: JSON.stringify(body),
+  })
+}
+
+function MyBookings({ refreshKey }) {
+  const [page, setPage] = useState(1)
+  const [attempt, setAttempt] = useState(0)
+  const [result, setResult] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    async function load() {
+      setLoading(true)
+      setError('')
+      setResult(null)
+      try {
+        const data = await accountRequest(`/api/bookings?page=${page}&limit=20`, { signal: controller.signal })
+        if (!Array.isArray(data.bookings)) throw new Error('Invalid booking history response.')
+        if (!controller.signal.aborted) setResult(data)
+      } catch (failure) {
+        if (!controller.signal.aborted) setError(failure.status === 401 ? 'Your session expired. Sign in again to view bookings.' : failure.message)
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    }
+    load()
+    return () => controller.abort()
+  }, [page, attempt, refreshKey])
+
+  return (
+    <section id="my-bookings" className="mt-14 scroll-mt-6 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h2 className="text-2xl font-bold">My Bookings</h2>
+        <button type="button" disabled={loading} onClick={() => setAttempt((value) => value + 1)} className="rounded-lg border px-4 py-2 disabled:opacity-50">Refresh bookings</button>
+      </div>
+      {loading && <p role="status" className="mt-4">Loading bookings…</p>}
+      {error && <p role="alert" className="mt-4 text-red-700">{error}</p>}
+      {!loading && !error && result?.bookings.length === 0 && <p className="mt-4 text-slate-600">{page === 1 ? 'You have no bookings yet.' : 'No bookings on this page.'}</p>}
+      {!loading && !error && result && (
+        <>
+          <div className="mt-5 space-y-4">
+            {result.bookings.map((booking) => (
+              <article key={booking.id} className="rounded-xl border border-slate-200 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="font-semibold">{booking.serviceNameSnapshot}</h3>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-sm capitalize">{booking.status}</span>
+                </div>
+                <p className="mt-3 text-sm text-slate-600">Preferred time: {new Date(booking.preferredAt).toLocaleString()}</p>
+                <p className="mt-2 whitespace-pre-wrap break-words">{booking.address}</p>
+                {booking.notes && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-600">Instructions: {booking.notes}</p>}
+                <p className="mt-3 break-all text-xs text-slate-500">Reference: {booking.id}</p>
+              </article>
+            ))}
+          </div>
+          <div className="mt-5 flex items-center gap-4">
+            <button type="button" disabled={page === 1} onClick={() => setPage((value) => value - 1)} className="rounded-lg border px-4 py-2 disabled:opacity-40">Previous</button>
+            <span>Page {page}</span>
+            <button type="button" disabled={!result.hasMore} onClick={() => setPage((value) => value + 1)} className="rounded-lg border px-4 py-2 disabled:opacity-40">Next</button>
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
 export default function App() {
+  const [user, setUser] = useState(null)
+  const [bookingBusy, setBookingBusy] = useState(false)
+  const [bookingError, setBookingError] = useState('')
+  const [bookingsRefresh, setBookingsRefresh] = useState(0)
+  const submittingBooking = useRef(false)
+  const [checkingSession, setCheckingSession] = useState(true)
+  const [sessionError, setSessionError] = useState('')
+  const [sessionAttempt, setSessionAttempt] = useState(0)
+  const [authMode, setAuthMode] = useState('login')
+  const [account, setAccount] = useState({ name: '', email: '', password: '' })
+  const [authErrors, setAuthErrors] = useState({})
+  const [authError, setAuthError] = useState('')
+  const [authMessage, setAuthMessage] = useState('')
+  const [authBusy, setAuthBusy] = useState(false)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    async function restoreSession() {
+      setCheckingSession(true)
+      setSessionError('')
+      try {
+        const data = await accountRequest('/api/auth/me', { signal: controller.signal })
+        if (!controller.signal.aborted) setUser(data.user)
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setUser(null)
+          if (error.status !== 401) setSessionError('Unable to check your session. Please try again.')
+        }
+      } finally {
+        if (!controller.signal.aborted) setCheckingSession(false)
+      }
+    }
+    restoreSession()
+    return () => controller.abort()
+  }, [sessionAttempt])
+
+  function changeAuthMode(mode) {
+    setAuthMode(mode)
+    setAccount((previous) => ({ ...previous, password: '' }))
+    setAuthErrors({})
+    setAuthError('')
+    setAuthMessage('')
+  }
+
+  function updateAccount(event) {
+    const { name, value } = event.target
+    setAccount((previous) => ({ ...previous, [name]: value }))
+    setAuthErrors((previous) => ({ ...previous, [name]: undefined }))
+    setAuthError('')
+    setAuthMessage('')
+  }
+
+  async function submitAccount(event) {
+    event.preventDefault()
+    if (authBusy || submittingBooking.current) return
+    const registering = authMode === 'register'
+    const fields = {}
+    if (registering && (account.name.trim().length < 2 || account.name.trim().length > 100)) {
+      fields.name = 'Use a name between 2 and 100 characters.'
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account.email.trim()) || account.email.trim().length > 254) {
+      fields.email = 'Enter a valid email address.'
+    }
+    if (account.password.length < (registering ? 12 : 1) || account.password.length > 128) {
+      fields.password = registering ? 'Use a password between 12 and 128 characters.' : 'Enter your password.'
+    }
+    setAuthErrors(fields)
+    setAuthError('')
+    setAuthMessage('')
+    if (Object.keys(fields).length) return
+    setAuthBusy(true)
+    try {
+      const body = { email: account.email.trim(), password: account.password }
+      if (registering) body.name = account.name.trim()
+      const data = await accountMutation(`/api/auth/${authMode}`, body)
+      setAccount((previous) => ({ ...previous, password: '' }))
+      if (registering) {
+        setAuthMode('login')
+        setAuthMessage('Account created. Sign in with your email and password.')
+      } else {
+        setUser(data.user)
+        setAuthMessage('You are signed in.')
+      }
+    } catch (error) {
+      setAuthError(error.message || 'Unable to connect. Please try again.')
+      setAuthErrors(error.fields || {})
+    } finally {
+      setAuthBusy(false)
+    }
+  }
+
+  async function logout() {
+    if (authBusy || submittingBooking.current) return
+    setAuthBusy(true)
+    setAuthError('')
+    setAuthMessage('')
+    try {
+      await accountMutation('/api/auth/logout', {})
+      setUser(null)
+      setAccount({ name: '', email: '', password: '' })
+      setPreview(null)
+      setBookingError('')
+      setForm({ serviceId: '', date: '', time: '', address: '', notes: '' })
+      setErrors({})
+      setAuthMessage('You have signed out.')
+    } catch (error) {
+      if (error.status === 401) {
+        setUser(null)
+        setPreview(null)
+      }
+      setAuthError(error.message || 'Unable to sign out. Please try again.')
+    } finally {
+      setAuthBusy(false)
+    }
+  }
+
   const [services, setServices] = useState([])
   const [loadingServices, setLoadingServices] = useState(true)
   const [serviceError, setServiceError] = useState('')
@@ -56,6 +261,8 @@ export default function App() {
   const [preview, setPreview] = useState(null)
 
   function updateField(event) {
+    if (submittingBooking.current) return
+    setBookingError('')
     const { name, value } = event.target
     setForm((previous) => ({ ...previous, [name]: value }))
     setErrors((previous) => ({ ...previous, [name]: undefined }))
@@ -63,6 +270,8 @@ export default function App() {
   }
 
   function selectService(serviceId) {
+    if (submittingBooking.current) return
+    setBookingError('')
     setForm((previous) => ({ ...previous, serviceId }))
     setErrors((previous) => ({ ...previous, serviceId: undefined }))
     setPreview(null)
@@ -71,10 +280,17 @@ export default function App() {
     })
   }
 
-  function submitPreview(event) {
+  async function submitBooking(event) {
     event.preventDefault()
 
-    if (catalogueUnavailable) return
+    if (catalogueUnavailable || submittingBooking.current || authBusy) return
+    setBookingError('')
+    setPreview(null)
+    if (!user || user.role !== 'customer') {
+      setBookingError('Sign in with a customer account before submitting a booking.')
+      document.getElementById('account').scrollIntoView({ behavior: 'smooth' })
+      return
+    }
 
     const nextErrors = {}
     const selectedService = services.find(
@@ -115,12 +331,41 @@ export default function App() {
       return
     }
 
-    setPreview({
-      service: selectedService.name,
-      preferredAt: preferredAt.toLocaleString(),
-      address: form.address.trim(),
-      notes: form.notes.trim(),
-    })
+    submittingBooking.current = true
+    setBookingBusy(true)
+    try {
+      const data = await accountMutation('/api/bookings', {
+        serviceId: form.serviceId,
+        preferredAt: preferredAt.toISOString(),
+        address: form.address.trim(),
+        notes: form.notes.trim(),
+      })
+      if (!data.booking?.id) throw new Error('The booking response was incomplete.')
+      setPreview({
+        id: data.booking.id,
+        service: data.booking.serviceNameSnapshot,
+        preferredAt: new Date(data.booking.preferredAt).toLocaleString(),
+        address: data.booking.address,
+        notes: data.booking.notes,
+      })
+      setForm({ serviceId: '', date: '', time: '', address: '', notes: '' })
+      setBookingsRefresh((value) => value + 1)
+    } catch (error) {
+      const fields = { ...(error.fields || {}) }
+      if (fields.preferredAt) fields.date = fields.preferredAt
+      setErrors(fields)
+      if (error.status === 401) {
+        setUser(null)
+        setAuthMessage('Your session expired. Please sign in again.')
+      }
+      setBookingError(error.status
+        ? error.message
+        : 'The submission result could not be confirmed. Refresh My Bookings before submitting again to avoid a duplicate request.')
+      if (error.code === 'SERVICE_UNAVAILABLE') setCatalogueAttempt((value) => value + 1)
+    } finally {
+      submittingBooking.current = false
+      setBookingBusy(false)
+    }
   }
 
   function fieldError(name) {
@@ -145,10 +390,12 @@ export default function App() {
           aria-label="Main navigation"
           className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-5"
         >
-          <a href="#" className="text-2xl font-bold tracking-tight text-teal-700">
-            Sweeplune
+          <a href="#" aria-label="Sweeplune home" className="shrink-0">
+                <img src={logo} alt="Sweeplune" className="h-24 w-auto object-contain" />
           </a>
-          <div className="flex gap-6 text-sm font-medium">
+          <div className="flex flex-wrap gap-6 text-sm font-medium">
+            <a href="#account" className="hover:text-teal-700">{user ? 'My account' : 'Sign in / Register'}</a>
+            {user?.role === 'customer' && <a href="#my-bookings" className="hover:text-teal-700">My Bookings</a>}
             <a href="#services" className="hover:text-teal-700">
               Services
             </a>
@@ -171,6 +418,51 @@ export default function App() {
             Explore our services and request your preferred cleaning time.
             Availability is confirmed after your request is reviewed.
           </p>
+        </section>
+
+        <section id="account" className="mt-14 scroll-mt-6 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
+          <h2 className="text-2xl font-bold">{user ? 'Your account' : 'Welcome to Sweeplune'}</h2>
+          {checkingSession ? (
+            <p role="status" className="mt-4 text-slate-600">Checking your session…</p>
+          ) : sessionError ? (
+            <div className="mt-4">
+              <p role="alert" className="text-red-700">{sessionError}</p>
+              <button type="button" className="mt-3 rounded-lg border px-4 py-2" onClick={() => setSessionAttempt((attempt) => attempt + 1)}>Try again</button>
+            </div>
+          ) : user ? (
+            <div className="mt-4">
+              <p className="text-slate-700">Signed in as <strong>{user.name}</strong></p>
+              <p className="mt-1 break-words text-sm text-slate-600">{user.email} · {user.role}</p>
+              <button type="button" disabled={authBusy || bookingBusy} onClick={logout} className="mt-5 rounded-xl border border-slate-300 px-5 py-3 font-medium disabled:opacity-50">
+                {authBusy ? 'Signing out…' : 'Sign out'}
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="mt-5 flex gap-3" aria-label="Account options">
+                <button type="button" disabled={authBusy || bookingBusy} aria-pressed={authMode === 'login'} onClick={() => changeAuthMode('login')} className={`rounded-lg px-4 py-2 ${authMode === 'login' ? 'bg-teal-700 text-white' : 'bg-slate-100'}`}>Sign in</button>
+                <button type="button" disabled={authBusy || bookingBusy} aria-pressed={authMode === 'register'} onClick={() => changeAuthMode('register')} className={`rounded-lg px-4 py-2 ${authMode === 'register' ? 'bg-teal-700 text-white' : 'bg-slate-100'}`}>Register</button>
+              </div>
+              <form onSubmit={submitAccount} noValidate className="mt-6 max-w-lg space-y-5">
+                <fieldset disabled={authBusy || bookingBusy} className="space-y-5">
+                  <legend className="sr-only">{authMode === 'register' ? 'Create an account' : 'Sign in to your account'}</legend>
+                  {(authMode === 'register' ? ['name', 'email', 'password'] : ['email', 'password']).map((name) => (
+                    <div key={name}>
+                      <label htmlFor={`auth-${name}`} className="font-medium">{name === 'name' ? 'Full name' : name === 'email' ? 'Email address' : 'Password'}</label>
+                      <input id={`auth-${name}`} name={name} type={name === 'name' ? 'text' : name} value={account[name]} onChange={updateAccount} required maxLength={name === 'name' ? 100 : name === 'email' ? 254 : 128} autoComplete={name === 'password' ? (authMode === 'register' ? 'new-password' : 'current-password') : name === 'name' ? 'name' : 'username'} className={inputStyle} aria-invalid={Boolean(authErrors[name])} aria-describedby={authErrors[name] ? `auth-${name}-error` : name === 'password' && authMode === 'register' ? 'password-help' : undefined} />
+                      {name === 'password' && authMode === 'register' && <p id="password-help" className="mt-2 text-sm text-slate-600">Use 12–128 characters.</p>}
+                      {authErrors[name] && <p id={`auth-${name}-error`} className="mt-2 text-sm text-red-700">{authErrors[name]}</p>}
+                    </div>
+                  ))}
+                  <button type="submit" className="rounded-xl bg-teal-700 px-6 py-3 font-semibold text-white hover:bg-teal-800 disabled:opacity-50">
+                    {authBusy ? 'Please wait…' : authMode === 'register' ? 'Create account' : 'Sign in'}
+                  </button>
+                </fieldset>
+              </form>
+            </>
+          )}
+          {authError && <p role="alert" className="mt-4 text-red-700">{authError}</p>}
+          {authMessage && <p role="status" className="mt-4 text-teal-800">{authMessage}</p>}
         </section>
 
         <section id="services" className="mt-14 scroll-mt-6">
@@ -224,11 +516,15 @@ export default function App() {
             Your preferred time is a request, not a confirmed appointment.
           </p>
           <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
-            Prototype: this form does not save or send bookings. Times currently
-            use your device’s local time zone.
+            Requests are saved as pending and require administrator confirmation.
+            Dates and times use your device’s local time zone.
+            {!user && <> <a href="#account" className="font-semibold underline">Sign in</a> to submit a request.</>}
           </p>
 
-          <form onSubmit={submitPreview} noValidate className="mt-6 space-y-5">
+          {bookingError && <p role="alert" className="mt-4 text-red-700">{bookingError}</p>}
+          <form onSubmit={submitBooking} noValidate className="mt-6 space-y-5">
+            <fieldset disabled={bookingBusy || authBusy} className="space-y-5">
+              <legend className="sr-only">Cleaning booking details</legend>
             <div>
               <label htmlFor="serviceId" className="font-medium">
                 Service
@@ -325,12 +621,13 @@ export default function App() {
             </div>
 
             <button
-              disabled={catalogueUnavailable}
+              disabled={catalogueUnavailable || bookingBusy || authBusy || checkingSession || user?.role !== 'customer'}
               type="submit"
               className="disabled:cursor-not-allowed disabled:opacity-50 rounded-xl bg-teal-700 px-6 py-3 font-semibold text-white hover:bg-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
             >
-              Preview request
+              {bookingBusy ? 'Submitting…' : 'Submit booking request'}
             </button>
+            </fieldset>
           </form>
 
           {preview && (
@@ -338,7 +635,8 @@ export default function App() {
               role="status"
               className="mt-6 rounded-xl border border-teal-200 bg-teal-50 p-5"
             >
-              <h3 className="font-semibold">Request preview — not submitted</h3>
+              <h3 className="font-semibold">Booking saved — pending confirmation</h3>
+              <p className="mt-2 break-all text-sm">Reference: {preview.id}</p>
               <dl className="mt-3 space-y-3 text-sm">
                 <div>
                   <dt className="font-semibold">Service</dt>
@@ -366,6 +664,7 @@ export default function App() {
             </div>
           )}
         </section>
+        {user?.role === 'customer' && <MyBookings key={user.id} refreshKey={bookingsRefresh} />}
       </main>
 
       <footer className="border-t border-slate-200 px-6 py-6 text-center text-sm text-slate-500">
