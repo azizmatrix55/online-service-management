@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import logo from './assets/sweeplune-logo.png'
-
 const inputStyle =
   'mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/20'
-
 async function accountRequest(path, options = {}) {
   const response = await fetch(path, { credentials: 'same-origin', ...options })
   let data
@@ -19,7 +17,6 @@ async function accountRequest(path, options = {}) {
   }
   return data
 }
-
 async function accountMutation(path, body, method = 'POST') {
   const { csrfToken } = await accountRequest('/api/auth/csrf')
   return accountRequest(path, {
@@ -28,14 +25,12 @@ async function accountMutation(path, body, method = 'POST') {
     body: JSON.stringify(body),
   })
 }
-
 function MyBookings({ refreshKey }) {
   const [page, setPage] = useState(1)
   const [attempt, setAttempt] = useState(0)
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-
   useEffect(() => {
     const controller = new AbortController()
     async function load() {
@@ -55,7 +50,6 @@ function MyBookings({ refreshKey }) {
     load()
     return () => controller.abort()
   }, [page, attempt, refreshKey])
-
   return (
     <section id="my-bookings" className="mt-14 scroll-mt-6 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -91,8 +85,7 @@ function MyBookings({ refreshKey }) {
     </section>
   )
 }
-
-function AdminDashboard({ onBusyChange }) {
+function AdminDashboard({ onBusyChange, disabled }) {
   const [view, setView] = useState({ page: 1, status: '' })
   const [attempt, setAttempt] = useState(0)
   const [result, setResult] = useState(null)
@@ -102,12 +95,10 @@ function AdminDashboard({ onBusyChange }) {
   const [busyId, setBusyId] = useState(null)
   const updating = useRef(false)
   const mounted = useRef(false)
-
   useEffect(() => {
     mounted.current = true
     return () => { mounted.current = false }
   }, [])
-
   useEffect(() => {
     const controller = new AbortController()
     async function load() {
@@ -131,9 +122,8 @@ function AdminDashboard({ onBusyChange }) {
     load()
     return () => controller.abort()
   }, [view, attempt])
-
   async function changeStatus(booking, status) {
-    if (updating.current) return
+    if (disabled || updating.current) return
     updating.current = true
     setBusyId(booking.id)
     onBusyChange(true)
@@ -166,10 +156,8 @@ function AdminDashboard({ onBusyChange }) {
       }
     }
   }
-
   const actions = { pending: ['confirmed', 'cancelled'], confirmed: ['completed', 'cancelled'] }
   const labels = { confirmed: 'Confirm booking', completed: 'Mark completed', cancelled: 'Cancel booking' }
-
   return (
     <section id="admin" className="mt-14 scroll-mt-6 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -177,11 +165,11 @@ function AdminDashboard({ onBusyChange }) {
           <h2 className="text-2xl font-bold">Admin dashboard</h2>
           <p className="mt-2 text-slate-600">Review cleaning requests and update their status.</p>
         </div>
-        <button type="button" disabled={loading || Boolean(busyId)} onClick={() => { setMessage(''); setAttempt((value) => value + 1) }} className="rounded-lg border px-4 py-2 disabled:opacity-50">Refresh bookings</button>
+        <button type="button" disabled={disabled || loading || Boolean(busyId)} onClick={() => { setMessage(''); setAttempt((value) => value + 1) }} className="rounded-lg border px-4 py-2 disabled:opacity-50">Refresh bookings</button>
       </div>
       <label htmlFor="admin-status" className="mt-6 block max-w-xs font-medium">
         Filter by status
-        <select id="admin-status" value={view.status} disabled={Boolean(busyId)} onChange={(event) => { setMessage(''); setView({ page: 1, status: event.target.value }) }} className={inputStyle}>
+        <select id="admin-status" value={view.status} disabled={disabled || Boolean(busyId)} onChange={(event) => { setMessage(''); setView({ page: 1, status: event.target.value }) }} className={inputStyle}>
           <option value="">All statuses</option>
           {['pending', 'confirmed', 'completed', 'cancelled'].map((status) => <option key={status} value={status}>{status[0].toUpperCase() + status.slice(1)}</option>)}
         </select>
@@ -207,7 +195,7 @@ function AdminDashboard({ onBusyChange }) {
                 <p className="mt-1 break-all text-xs text-slate-500">Reference: {booking.id}</p>
                 <div className="mt-4 flex flex-wrap gap-3">
                   {(actions[booking.status] || []).map((status) => (
-                    <button key={status} type="button" disabled={Boolean(busyId)} onClick={() => changeStatus(booking, status)} className={`rounded-lg px-4 py-2 font-medium disabled:opacity-50 ${status === 'cancelled' ? 'border border-red-300 text-red-700 hover:bg-red-50' : 'bg-teal-700 text-white hover:bg-teal-800'}`}>
+                    <button key={status} type="button" disabled={disabled || Boolean(busyId)} onClick={() => changeStatus(booking, status)} className={`rounded-lg px-4 py-2 font-medium disabled:opacity-50 ${status === 'cancelled' ? 'border border-red-300 text-red-700 hover:bg-red-50' : 'bg-teal-700 text-white hover:bg-teal-800'}`}>
                       {busyId === booking.id ? 'Updating…' : labels[status]}
                     </button>
                   ))}
@@ -225,9 +213,199 @@ function AdminDashboard({ onBusyChange }) {
             ))}
           </div>
           <div className="mt-6 flex flex-wrap items-center gap-4">
-            <button type="button" disabled={view.page === 1 || Boolean(busyId)} onClick={() => setView((previous) => ({ ...previous, page: previous.page - 1 }))} className="rounded-lg border px-4 py-2 disabled:opacity-40">Previous</button>
+            <button type="button" disabled={disabled || view.page === 1 || Boolean(busyId)} onClick={() => setView((previous) => ({ ...previous, page: previous.page - 1 }))} className="rounded-lg border px-4 py-2 disabled:opacity-40">Previous</button>
             <span>Page {view.page}</span>
-            <button type="button" disabled={!result.hasMore || Boolean(busyId)} onClick={() => setView((previous) => ({ ...previous, page: previous.page + 1 }))} className="rounded-lg border px-4 py-2 disabled:opacity-40">Next</button>
+            <button type="button" disabled={disabled || !result.hasMore || Boolean(busyId)} onClick={() => setView((previous) => ({ ...previous, page: previous.page + 1 }))} className="rounded-lg border px-4 py-2 disabled:opacity-40">Next</button>
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+function AdminServices({ disabled, onBusyChange, onCatalogueChange }) {
+  const emptyForm = { name: '', description: '', isActive: true }
+  const [form, setForm] = useState(emptyForm)
+  const [editing, setEditing] = useState(null)
+  const [page, setPage] = useState(1)
+  const [attempt, setAttempt] = useState(0)
+  const [result, setResult] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [needsRefresh, setNeedsRefresh] = useState(false)
+  const [error, setError] = useState('')
+  const [fields, setFields] = useState({})
+  const [message, setMessage] = useState('')
+  const updating = useRef(false)
+  const mounted = useRef(false)
+  const editor = useRef(null)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    async function load() {
+      setLoading(true)
+      setResult(null)
+      try {
+        const data = await accountRequest(`/api/admin/services?page=${page}&limit=20`, { signal: controller.signal })
+        if (!Array.isArray(data.services)) throw new Error('Invalid service list response.')
+        if (!controller.signal.aborted) {
+          setResult(data)
+          setNeedsRefresh(false)
+        }
+      } catch (failure) {
+        if (!controller.signal.aborted) setError(accessMessage(failure))
+      } finally {
+        if (!controller.signal.aborted) setLoading(false)
+      }
+    }
+    load()
+    return () => controller.abort()
+  }, [page, attempt])
+
+  function accessMessage(failure) {
+    return failure.status === 401 ? 'Your session expired. Sign out and sign in again.'
+      : failure.status === 403 ? 'Administrator access is required. If your session expired, sign out and sign in again.'
+      : failure.message || 'Unable to load services. Please try again.'
+  }
+
+  function resetEditor() {
+    setEditing(null)
+    setForm(emptyForm)
+    setFields({})
+  }
+
+  function refresh() {
+    if (disabled || updating.current) return
+    resetEditor()
+    setError('')
+    setMessage('')
+    setAttempt((value) => value + 1)
+    onCatalogueChange()
+  }
+
+  function edit(service) {
+    if (disabled || loading || updating.current || needsRefresh) return
+    setEditing({ id: service.id, version: service.version })
+    setForm({ name: service.name, description: service.description, isActive: service.isActive })
+    setFields({})
+    setError('')
+    setMessage('')
+    editor.current?.focus()
+  }
+
+  function updateField(event) {
+    const { name, value, checked, type } = event.target
+    setForm((previous) => ({ ...previous, [name]: type === 'checkbox' ? checked : value }))
+    setFields((previous) => ({ ...previous, [name]: undefined }))
+  }
+
+  async function saveService(event) {
+    event.preventDefault()
+    if (disabled || loading || updating.current || needsRefresh) return
+    const errors = {}
+    if (!form.name.trim() || form.name.trim().length > 100) errors.name = 'Use between 1 and 100 characters.'
+    if (!form.description.trim() || form.description.trim().length > 1000) errors.description = 'Use between 1 and 1,000 characters.'
+    setFields(errors)
+    setError('')
+    setMessage('')
+    if (Object.keys(errors).length) return
+    updating.current = true
+    setBusy(true)
+    onBusyChange(true)
+    try {
+      const body = { name: form.name.trim(), description: form.description.trim(), isActive: form.isActive }
+      if (editing) body.expectedVersion = editing.version
+      const data = await accountMutation(editing ? `/api/admin/services/${editing.id}` : '/api/admin/services', body, editing ? 'PATCH' : 'POST')
+      if (!data.service?.id) throw new Error('Incomplete service response.')
+      if (mounted.current) {
+        setMessage(`Service ${editing ? 'updated' : 'created'} successfully.`)
+        resetEditor()
+        setLoading(true)
+        setResult(null)
+        setAttempt((value) => value + 1)
+        onCatalogueChange()
+      }
+    } catch (failure) {
+      if (mounted.current) {
+        setFields(failure.fields || {})
+        setError(failure.status === 409
+          ? 'This service changed elsewhere. Reload services, then select Edit again. Reloading clears the form.'
+          : failure.status ? accessMessage(failure)
+          : 'The save result could not be confirmed. Reload services and check the list before saving again. Reloading clears the form.')
+        if (!failure.status || failure.status === 409 || failure.status === 404) setNeedsRefresh(true)
+      }
+    } finally {
+      updating.current = false
+      if (mounted.current) {
+        setBusy(false)
+        onBusyChange(false)
+      }
+    }
+  }
+
+  const locked = disabled || busy || loading
+  return (
+    <section id="admin-services" className="mt-10 scroll-mt-6 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold">Manage services</h2>
+          <p className="mt-2 text-slate-600">Add services or edit their details and availability. Deactivation preserves existing booking history.</p>
+        </div>
+        <button type="button" disabled={locked} onClick={refresh} className="rounded-lg border px-4 py-2 disabled:opacity-50">Reload services</button>
+      </div>
+      {message && <p role="status" className="mt-4 text-teal-800">{message}</p>}
+      {error && <p role="alert" className="mt-4 text-red-700">{error}</p>}
+      <form onSubmit={saveService} noValidate className="mt-6 rounded-xl bg-slate-50 p-5">
+        <h3 tabIndex={-1} ref={editor} className="text-lg font-semibold">{editing ? 'Edit service' : 'Add a service'}</h3>
+        <fieldset disabled={locked || needsRefresh} className="mt-4 space-y-4">
+          <legend className="sr-only">Service details</legend>
+          {['name', 'description'].map((name) => (
+            <div key={name}>
+              <label htmlFor={`service-${name}`} className="font-medium">{name === 'name' ? 'Service name' : 'Description'}</label>
+              {name === 'name' ? (
+                <input id={`service-${name}`} name={name} value={form[name]} onChange={updateField} required maxLength={100} className={inputStyle} aria-invalid={Boolean(fields[name])} aria-describedby={fields[name] ? `service-${name}-error` : undefined} />
+              ) : (
+                <textarea id={`service-${name}`} name={name} value={form[name]} onChange={updateField} rows={3} required maxLength={1000} className={inputStyle} aria-invalid={Boolean(fields[name])} aria-describedby={fields[name] ? `service-${name}-error` : undefined} />
+              )}
+              {fields[name] && <p id={`service-${name}-error`} className="mt-2 text-sm text-red-700">{fields[name]}</p>}
+            </div>
+          ))}
+          <label className="flex items-center gap-3 font-medium">
+            <input type="checkbox" name="isActive" checked={form.isActive} onChange={updateField} className="h-4 w-4 accent-teal-700" />
+            Active — customers can book this service
+          </label>
+          {fields.isActive && <p className="text-sm text-red-700">{fields.isActive}</p>}
+          {fields.form && <p className="text-sm text-red-700">{fields.form}</p>}
+          <div className="flex flex-wrap gap-3">
+            <button type="submit" className="rounded-lg bg-teal-700 px-5 py-3 font-semibold text-white hover:bg-teal-800 disabled:opacity-50">{busy ? 'Saving…' : editing ? 'Save changes' : 'Create service'}</button>
+            {editing && <button type="button" onClick={resetEditor} className="rounded-lg border px-5 py-3">Cancel editing</button>}
+          </div>
+        </fieldset>
+      </form>
+      {loading && <p role="status" className="mt-5">Loading services…</p>}
+      {!loading && result && (
+        <>
+          {!result.services.length && <p className="mt-5 text-slate-600">No services on this page.</p>}
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+            {result.services.map((service) => (
+              <article key={service.id} className="rounded-xl border border-slate-200 p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="break-words font-semibold">{service.name}</h3>
+                  <span className={`rounded-full px-3 py-1 text-sm ${service.isActive ? 'bg-teal-50 text-teal-800' : 'bg-slate-100 text-slate-600'}`}>{service.isActive ? 'Active' : 'Inactive'}</span>
+                </div>
+                <p className="mt-3 whitespace-pre-wrap break-words text-slate-600">{service.description}</p>
+                <button type="button" disabled={locked || needsRefresh} onClick={() => edit(service)} className="mt-4 rounded-lg border px-4 py-2 font-medium disabled:opacity-50">Edit service</button>
+              </article>
+            ))}
+          </div>
+          <div className="mt-6 flex flex-wrap items-center gap-4">
+            <button type="button" disabled={page === 1 || locked} onClick={() => { resetEditor(); setError(''); setMessage(''); setPage((value) => value - 1) }} className="rounded-lg border px-4 py-2 disabled:opacity-40">Previous</button>
+            <span>Page {page}</span>
+            <button type="button" disabled={!result.hasMore || locked} onClick={() => { resetEditor(); setError(''); setMessage(''); setPage((value) => value + 1) }} className="rounded-lg border px-4 py-2 disabled:opacity-40">Next</button>
           </div>
         </>
       )}
@@ -251,7 +429,6 @@ export default function App() {
   const [authError, setAuthError] = useState('')
   const [authMessage, setAuthMessage] = useState('')
   const [authBusy, setAuthBusy] = useState(false)
-
   useEffect(() => {
     const controller = new AbortController()
     async function restoreSession() {
@@ -272,7 +449,6 @@ export default function App() {
     restoreSession()
     return () => controller.abort()
   }, [sessionAttempt])
-
   function changeAuthMode(mode) {
     setAuthMode(mode)
     setAccount((previous) => ({ ...previous, password: '' }))
@@ -280,7 +456,6 @@ export default function App() {
     setAuthError('')
     setAuthMessage('')
   }
-
   function updateAccount(event) {
     const { name, value } = event.target
     setAccount((previous) => ({ ...previous, [name]: value }))
@@ -288,7 +463,6 @@ export default function App() {
     setAuthError('')
     setAuthMessage('')
   }
-
   async function submitAccount(event) {
     event.preventDefault()
     if (authBusy || adminBusy || submittingBooking.current) return
@@ -327,7 +501,6 @@ export default function App() {
       setAuthBusy(false)
     }
   }
-
   async function logout() {
     if (authBusy || adminBusy || submittingBooking.current) return
     setAuthBusy(true)
@@ -352,15 +525,12 @@ export default function App() {
       setAuthBusy(false)
     }
   }
-
   const [services, setServices] = useState([])
   const [loadingServices, setLoadingServices] = useState(true)
   const [serviceError, setServiceError] = useState('')
   const [catalogueAttempt, setCatalogueAttempt] = useState(0)
-
   useEffect(() => {
     const controller = new AbortController()
-
     async function loadServices() {
       setLoadingServices(true)
       setServiceError('')
@@ -387,13 +557,10 @@ export default function App() {
         if (!controller.signal.aborted) setLoadingServices(false)
       }
     }
-
     loadServices()
     return () => controller.abort()
   }, [catalogueAttempt])
-
   const catalogueUnavailable = loadingServices || Boolean(serviceError) || services.length === 0
-
   const [form, setForm] = useState({
     serviceId: '',
     date: '',
@@ -403,7 +570,6 @@ export default function App() {
   })
   const [errors, setErrors] = useState({})
   const [preview, setPreview] = useState(null)
-
   function updateField(event) {
     if (submittingBooking.current) return
     setBookingError('')
@@ -412,7 +578,6 @@ export default function App() {
     setErrors((previous) => ({ ...previous, [name]: undefined }))
     setPreview(null)
   }
-
   function selectService(serviceId) {
     if (submittingBooking.current) return
     setBookingError('')
@@ -423,10 +588,8 @@ export default function App() {
       behavior: 'smooth',
     })
   }
-
   async function submitBooking(event) {
     event.preventDefault()
-
     if (catalogueUnavailable || submittingBooking.current || authBusy) return
     setBookingError('')
     setPreview(null)
@@ -435,20 +598,16 @@ export default function App() {
       document.getElementById('account').scrollIntoView({ behavior: 'smooth' })
       return
     }
-
     const nextErrors = {}
     const selectedService = services.find(
       (service) => service.id === form.serviceId,
     )
     const preferredAt = new Date(`${form.date}T${form.time}`)
-
     if (!selectedService) {
       nextErrors.serviceId = 'Please select a service.'
     }
-
     if (!form.date) nextErrors.date = 'Please choose a date.'
     if (!form.time) nextErrors.time = 'Please choose a time.'
-
     if (
       form.date &&
       form.time &&
@@ -457,24 +616,19 @@ export default function App() {
     ) {
       nextErrors.date = 'Choose a future date and time.'
     }
-
     if (!form.address.trim()) {
       nextErrors.address = 'Please enter the cleaning address.'
     } else if (form.address.trim().length > 300) {
       nextErrors.address = 'Use no more than 300 characters.'
     }
-
     if (form.notes.length > 1000) {
       nextErrors.notes = 'Use no more than 1,000 characters.'
     }
-
     setErrors(nextErrors)
-
     if (Object.keys(nextErrors).length > 0) {
       setPreview(null)
       return
     }
-
     submittingBooking.current = true
     setBookingBusy(true)
     try {
@@ -511,7 +665,6 @@ export default function App() {
       setBookingBusy(false)
     }
   }
-
   function fieldError(name) {
     return errors[name] ? (
       <p id={`${name}-error`} className="mt-2 text-sm text-red-700">
@@ -519,14 +672,12 @@ export default function App() {
       </p>
     ) : null
   }
-
   function accessibility(name) {
     return {
       'aria-invalid': Boolean(errors[name]),
       'aria-describedby': errors[name] ? `${name}-error` : undefined,
     }
   }
-
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="border-b border-slate-200 bg-white">
@@ -541,6 +692,7 @@ export default function App() {
             <a href="#account" className="hover:text-teal-700">{user ? 'My account' : 'Sign in / Register'}</a>
             {user?.role === 'customer' && <a href="#my-bookings" className="hover:text-teal-700">My Bookings</a>}
             {user?.role === 'admin' && <a href="#admin" className="hover:text-teal-700">Admin dashboard</a>}
+            {user?.role === 'admin' && <a href="#admin-services" className="hover:text-teal-700">Manage services</a>}
             <a href="#services" className="hover:text-teal-700">
               Services
             </a>
@@ -550,7 +702,6 @@ export default function App() {
           </div>
         </nav>
       </header>
-
       <main className="mx-auto max-w-6xl px-6 py-12">
         <section className="max-w-2xl">
           <p className="text-sm font-semibold uppercase tracking-widest text-teal-700">
@@ -564,7 +715,6 @@ export default function App() {
             Availability is confirmed after your request is reviewed.
           </p>
         </section>
-
         <section id="account" className="mt-14 scroll-mt-6 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
           <h2 className="text-2xl font-bold">{user ? 'Your account' : 'Welcome to Sweeplune'}</h2>
           {checkingSession ? (
@@ -609,9 +759,8 @@ export default function App() {
           {authError && <p role="alert" className="mt-4 text-red-700">{authError}</p>}
           {authMessage && <p role="status" className="mt-4 text-teal-800">{authMessage}</p>}
         </section>
-
-        {user?.role === 'admin' && <AdminDashboard key={user.id} onBusyChange={setAdminBusy} />}
-
+        {user?.role === 'admin' && <AdminDashboard key={`bookings-${user.id}`} onBusyChange={setAdminBusy} disabled={adminBusy || authBusy} />}
+        {user?.role === 'admin' && <AdminServices key={`services-${user.id}`} onBusyChange={setAdminBusy} disabled={adminBusy || authBusy} onCatalogueChange={() => setCatalogueAttempt((value) => value + 1)} />}
         <section id="services" className="mt-14 scroll-mt-6">
           <h2 className="text-2xl font-bold">Our services</h2>
           {loadingServices && (
@@ -653,7 +802,6 @@ export default function App() {
             ))}
           </div>
         </section>
-
         <section
           id="booking"
           className="mt-14 scroll-mt-6 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8"
@@ -667,7 +815,6 @@ export default function App() {
             Dates and times use your device’s local time zone.
             {!user && <> <a href="#account" className="font-semibold underline">Sign in</a> to submit a request.</>}
           </p>
-
           {bookingError && <p role="alert" className="mt-4 text-red-700">{bookingError}</p>}
           <form onSubmit={submitBooking} noValidate className="mt-6 space-y-5">
             <fieldset disabled={bookingBusy || authBusy} className="space-y-5">
@@ -695,7 +842,6 @@ export default function App() {
               </select>
               {fieldError('serviceId')}
             </div>
-
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
                 <label htmlFor="date" className="font-medium">
@@ -730,7 +876,6 @@ export default function App() {
                 {fieldError('time')}
               </div>
             </div>
-
             <div>
               <label htmlFor="address" className="font-medium">
                 Cleaning address
@@ -749,7 +894,6 @@ export default function App() {
               />
               {fieldError('address')}
             </div>
-
             <div>
               <label htmlFor="notes" className="font-medium">
                 Additional instructions (optional)
@@ -766,7 +910,6 @@ export default function App() {
               />
               {fieldError('notes')}
             </div>
-
             <button
               disabled={catalogueUnavailable || bookingBusy || authBusy || checkingSession || user?.role !== 'customer'}
               type="submit"
@@ -776,7 +919,6 @@ export default function App() {
             </button>
             </fieldset>
           </form>
-
           {preview && (
             <div
               role="status"
@@ -813,7 +955,6 @@ export default function App() {
         </section>
         {user?.role === 'customer' && <MyBookings key={user.id} refreshKey={bookingsRefresh} />}
       </main>
-
       <footer className="border-t border-slate-200 px-6 py-6 text-center text-sm text-slate-500">
         Sweeplune · Cleaning service booking and management
       </footer>
