@@ -1,4 +1,6 @@
 import 'dotenv/config'
+import { fileURLToPath } from 'node:url'
+import { configureTransport, assertClientBuild, serveClient } from './web-hosting.js'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import express from 'express'
 import mongoose from 'mongoose'
@@ -12,6 +14,7 @@ import Booking from './models/Booking.js'
 const app = express()
 const port = Number(process.env.PORT || 3000)
 const production = process.env.NODE_ENV === 'production'
+const clientDirectory = fileURLToPath(new URL('../../client/dist/', import.meta.url))
 const cookieName = 'sweeplune.sid'
 const idleLifetime = 30 * 60 * 1000
 const absoluteLifetime = 8 * 60 * 60 * 1000
@@ -96,6 +99,8 @@ async function startServer() {
       throw new Error('APP_ORIGIN is missing from server/.env')
     }
     const appOrigin = new URL(process.env.APP_ORIGIN).origin
+    configureTransport(app, { production, appOrigin: process.env.APP_ORIGIN, proxyHops: process.env.TRUST_PROXY_HOPS || '' })
+    if (production) assertClientBuild(clientDirectory)
     await mongoose.connect(process.env.MONGODB_URI, {
       serverSelectionTimeoutMS: 5000,
     })
@@ -704,6 +709,7 @@ async function startServer() {
         message: 'API route not found.',
       })
     })
+    if (production) serveClient(app, clientDirectory)
     app.use((error, req, res, next) => {
       if (res.headersSent) return next(error)
       if (error.type === 'entity.parse.failed') {
@@ -727,8 +733,26 @@ async function startServer() {
       })
     })
     console.log('MongoDB connected')
-    app.listen(port, () => {
+    const server = app.listen(port, '0.0.0.0', () => {
       console.log(`Sweeplune API running at http://localhost:${port}`)
+    })
+    let closing = false
+    function shutdown() {
+      if (closing) return
+      closing = true
+      const deadline = setTimeout(() => { server.closeAllConnections(); process.exit(1) }, 10000)
+      deadline.unref()
+      server.close(async () => {
+        try { await mongoose.disconnect(); clearTimeout(deadline); process.exitCode = 0 }
+        catch { process.exitCode = 1 }
+      })
+    }
+    process.once('SIGTERM', shutdown)
+    process.once('SIGINT', shutdown)
+    server.on('error', async (error) => {
+      console.error('HTTP server failed:', error.code)
+      await mongoose.disconnect()
+      process.exitCode = 1
     })
   } catch (error) {
     console.error('Server startup failed:', error.message)
