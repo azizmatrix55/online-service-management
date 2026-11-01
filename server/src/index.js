@@ -9,21 +9,18 @@ import { rateLimit } from 'express-rate-limit'
 import Service from './models/Service.js'
 import User from './models/User.js'
 import Booking from './models/Booking.js'
-
 const app = express()
 const port = Number(process.env.PORT || 3000)
 const production = process.env.NODE_ENV === 'production'
 const cookieName = 'sweeplune.sid'
 const idleLifetime = 30 * 60 * 1000
 const absoluteLifetime = 8 * 60 * 60 * 1000
-
 const cookieOptions = {
   httpOnly: true,
   secure: production,
   sameSite: 'lax',
   path: '/',
 }
-
 function publicUser(user) {
   return {
     id: user._id.toString(),
@@ -32,7 +29,6 @@ function publicUser(user) {
     role: user.role,
   }
 }
-
 function sessionAction(req, action) {
   return new Promise((resolve, reject) => {
     req.session[action]((error) => {
@@ -41,24 +37,19 @@ function sessionAction(req, action) {
     })
   })
 }
-
 function validToken(received, expected) {
   if (typeof received !== 'string' || typeof expected !== 'string') {
     return false
   }
-
   const first = Buffer.from(received)
   const second = Buffer.from(expected)
-
   return first.length === second.length && timingSafeEqual(first, second)
 }
-
 function validateAccount(body, registering) {
   const fields = {}
   const allowed = registering
     ? ['name', 'email', 'password']
     : ['email', 'password']
-
   if (
     !body ||
     typeof body !== 'object' ||
@@ -69,19 +60,15 @@ function validateAccount(body, registering) {
       fields: { form: 'Submit only the permitted account fields.' },
     }
   }
-
   const email =
     typeof body.email === 'string' ? body.email.trim().toLowerCase() : ''
-
   const password = typeof body.password === 'string' ? body.password : ''
-
   if (
     email.length > 254 ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
   ) {
     fields.email = 'Enter a valid email address.'
   }
-
   if (
     password.length > 128 ||
     password.length < (registering ? 12 : 1)
@@ -90,41 +77,32 @@ function validateAccount(body, registering) {
       ? 'Use a password between 12 and 128 characters.'
       : 'Enter your password.'
   }
-
   const name =
     typeof body.name === 'string' ? body.name.trim() : ''
-
   if (registering && (name.length < 2 || name.length > 100)) {
     fields.name = 'Use a name between 2 and 100 characters.'
   }
-
   return { fields, name, email, password }
 }
-
 async function startServer() {
   try {
     if (!process.env.MONGODB_URI) {
       throw new Error('MONGODB_URI is missing from server/.env')
     }
-
     if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
       throw new Error('SESSION_SECRET must contain at least 32 characters')
     }
-
     if (!process.env.APP_ORIGIN) {
       throw new Error('APP_ORIGIN is missing from server/.env')
     }
-
     const appOrigin = new URL(process.env.APP_ORIGIN).origin
-
     await mongoose.connect(process.env.MONGODB_URI, {
       serverSelectionTimeoutMS: 5000,
     })
-
     // Ensure the unique email index exists before accepting registrations.
     await User.init()
     await Booking.init()
-
+    await Service.init()
     // Used to verify a password even when an email is unknown.
     const dummyHash = await argon2.hash(randomBytes(32).toString('hex'), {
       type: argon2.argon2id,
@@ -132,27 +110,22 @@ async function startServer() {
       timeCost: 2,
       parallelism: 1,
     })
-
     app.disable('x-powered-by')
     app.use(express.json({ limit: '16kb' }))
-
     app.get('/api/health', (req, res) => {
       const connected = mongoose.connection.readyState === 1
-
       res.status(connected ? 200 : 503).json({
         status: connected ? 'ok' : 'unavailable',
         application: 'Sweeplune',
         database: connected ? 'connected' : 'disconnected',
       })
     })
-
     app.get('/api/services', async (req, res, next) => {
       try {
         const services = await Service.find({ isActive: true })
           .select('_id name description')
           .sort({ name: 1, _id: 1 })
           .lean()
-
         res.json(
           services.map((service) => ({
             id: service._id.toString(),
@@ -164,18 +137,15 @@ async function startServer() {
         next(error)
       }
     })
-
     const sessionStore = MongoStore.create({
       client: mongoose.connection.getClient(),
       dbName: mongoose.connection.name,
       collectionName: 'sessions',
       ttl: idleLifetime / 1000,
     })
-
     sessionStore.on('error', () => {
       console.error('Session store error')
     })
-
     app.use(
       '/api',
       session({
@@ -191,7 +161,6 @@ async function startServer() {
         },
       }),
     )
-
     // Expire authenticated sessions after eight hours, even with activity.
     app.use('/api', async (req, res, next) => {
       try {
@@ -207,18 +176,15 @@ async function startServer() {
             message: 'Your session expired. Please sign in again.',
           })
         }
-
         next()
       } catch (error) {
         next(error)
       }
     })
-
     app.use('/api/auth', (req, res, next) => {
       res.set('Cache-Control', 'no-store')
       next()
     })
-
     const authLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
       limit: 20,
@@ -229,7 +195,6 @@ async function startServer() {
         message: 'Too many attempts. Please try again later.',
       },
     })
-
     const csrfLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
       limit: 100,
@@ -240,27 +205,23 @@ async function startServer() {
         message: 'Too many requests. Please try again later.',
       },
     })
-
     // The frontend must fetch this before sending a mutation.
     app.get('/api/auth/csrf', csrfLimiter, async (req, res, next) => {
       try {
         if (!req.session.csrfToken) {
           req.session.csrfToken = randomBytes(32).toString('hex')
         }
-
         await sessionAction(req, 'save')
         res.json({ csrfToken: req.session.csrfToken })
       } catch (error) {
         next(error)
       }
     })
-
     // Protect all subsequent state-changing API routes.
     app.use('/api', (req, res, next) => {
       if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
         return next()
       }
-
       if (
         req.get('origin') !== appOrigin ||
         !validToken(req.get('x-csrf-token'), req.session.csrfToken)
@@ -270,15 +231,12 @@ async function startServer() {
           message: 'Refresh the page and try again.',
         })
       }
-
       next()
     })
-
     app.post('/api/auth/register', authLimiter, async (req, res, next) => {
       try {
         const { fields, name, email, password } =
           validateAccount(req.body, true)
-
         if (Object.keys(fields).length) {
           return res.status(400).json({
             code: 'VALIDATION_FAILED',
@@ -286,21 +244,18 @@ async function startServer() {
             fields,
           })
         }
-
         const passwordHash = await argon2.hash(password, {
           type: argon2.argon2id,
           memoryCost: 19456,
           timeCost: 2,
           parallelism: 1,
         })
-
         const user = await User.create({
           name,
           email,
           passwordHash,
           role: 'customer',
         })
-
         // Registration creates an account; login is a separate step.
         res.status(201).json({
           message: 'Account created. You can now sign in.',
@@ -313,16 +268,13 @@ async function startServer() {
             message: 'An account with this email already exists.',
           })
         }
-
         next(error)
       }
     })
-
     app.post('/api/auth/login', authLimiter, async (req, res, next) => {
       try {
         const { fields, email, password } =
           validateAccount(req.body, false)
-
         if (Object.keys(fields).length) {
           return res.status(400).json({
             code: 'VALIDATION_FAILED',
@@ -330,28 +282,22 @@ async function startServer() {
             fields,
           })
         }
-
         const user = await User.findOne({ email }).select('+passwordHash')
         const verified = await argon2.verify(
           user ? user.passwordHash : dummyHash,
           password,
         )
-
         if (!user || !verified) {
           return res.status(401).json({
             code: 'INVALID_CREDENTIALS',
             message: 'Invalid email or password.',
           })
         }
-
         await sessionAction(req, 'regenerate')
-
         req.session.userId = user._id.toString()
         req.session.loginAt = Date.now()
         req.session.csrfToken = randomBytes(32).toString('hex')
-
         await sessionAction(req, 'save')
-
         res.json({
           user: publicUser(user),
           csrfToken: req.session.csrfToken,
@@ -360,7 +306,6 @@ async function startServer() {
         next(error)
       }
     })
-
     app.get('/api/auth/me', async (req, res, next) => {
       try {
         if (!req.session.userId) {
@@ -369,26 +314,21 @@ async function startServer() {
             message: 'Please sign in.',
           })
         }
-
         // Read the current role from the database, not the browser.
         const user = await User.findById(req.session.userId)
-
         if (!user) {
           await sessionAction(req, 'destroy')
           res.clearCookie(cookieName, cookieOptions)
-
           return res.status(401).json({
             code: 'AUTH_REQUIRED',
             message: 'Please sign in again.',
           })
         }
-
         res.json({ user: publicUser(user) })
       } catch (error) {
         next(error)
       }
     })
-
     app.post('/api/auth/logout', async (req, res, next) => {
       try {
         await sessionAction(req, 'destroy')
@@ -398,7 +338,6 @@ async function startServer() {
         next(error)
       }
     })
-
     // Always load trusted identity and role before accessing bookings.
     async function requireCustomer(req, res, next) {
       res.set('Cache-Control', 'no-store')
@@ -421,7 +360,6 @@ async function startServer() {
         next(error)
       }
     }
-
     function publicBooking(booking) {
       return {
         id: booking._id.toString(),
@@ -435,7 +373,6 @@ async function startServer() {
         updatedAt: booking.updatedAt,
       }
     }
-
     app.post('/api/bookings', requireCustomer, async (req, res, next) => {
       try {
         const body = req.body
@@ -448,11 +385,9 @@ async function startServer() {
             fields: { form: 'Unexpected booking fields.' },
           })
         }
-
         const fields = {}
         const serviceId = typeof body.serviceId === 'string' ? body.serviceId : ''
         if (!/^[a-fA-F0-9]{24}$/.test(serviceId)) fields.serviceId = 'Select a valid service.'
-
         // Require an ISO timestamp with an explicit UTC or numeric offset.
         const timestamp = typeof body.preferredAt === 'string' ? body.preferredAt : ''
         const isoPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/
@@ -464,7 +399,6 @@ async function startServer() {
             !Number.isFinite(preferredAt.getTime()) || preferredAt.getTime() <= Date.now()) {
           fields.preferredAt = 'Choose a valid future date and time with a time zone.'
         }
-
         const address = typeof body.address === 'string' ? body.address.trim() : ''
         if (!address || address.length > 300) fields.address = 'Enter an address of 1–300 characters.'
         const notes = body.notes === undefined ? '' : body.notes
@@ -472,7 +406,6 @@ async function startServer() {
         if (Object.keys(fields).length) {
           return res.status(400).json({ code: 'VALIDATION_FAILED', message: 'Check your booking details.', fields })
         }
-
         const service = await Service.findOne({ _id: serviceId, isActive: true }).select('name').lean()
         if (!service) {
           return res.status(400).json({
@@ -480,7 +413,6 @@ async function startServer() {
             fields: { serviceId: 'Choose an active service.' },
           })
         }
-
         const booking = await Booking.create({
           customerId: req.customerId,
           serviceId: service._id,
@@ -496,7 +428,6 @@ async function startServer() {
         next(error)
       }
     })
-
     app.get('/api/bookings', requireCustomer, async (req, res, next) => {
       try {
         const allowed = ['page', 'limit']
@@ -525,7 +456,6 @@ async function startServer() {
         next(error)
       }
     })
-
     app.get('/api/bookings/:id', requireCustomer, async (req, res, next) => {
       try {
         const validId = /^[a-fA-F0-9]{24}$/.test(req.params.id)
@@ -540,7 +470,6 @@ async function startServer() {
         next(error)
       }
     })
-
     async function requireAdmin(req, res, next) {
       res.set('Cache-Control', 'no-store')
       try {
@@ -562,7 +491,6 @@ async function startServer() {
         next(error)
       }
     }
-
     function adminBooking(booking) {
       return {
         ...publicBooking(booking),
@@ -571,7 +499,6 @@ async function startServer() {
         statusHistory: booking.statusHistory,
       }
     }
-
     app.get('/api/admin/bookings', requireAdmin, async (req, res, next) => {
       try {
         const allowed = ['page', 'limit', 'status', 'from', 'to']
@@ -615,7 +542,6 @@ async function startServer() {
         next(error)
       }
     })
-
     app.patch('/api/admin/bookings/:id/status', requireAdmin, async (req, res, next) => {
       try {
         if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
@@ -662,6 +588,115 @@ async function startServer() {
         next(error)
       }
     })
+    function adminService(service) {
+      return {
+        id: service._id.toString(),
+        slug: service.slug,
+        name: service.name,
+        description: service.description,
+        isActive: service.isActive,
+        version: service.__v ?? 0,
+        createdAt: service.createdAt,
+        updatedAt: service.updatedAt,
+      }
+    }
+
+    function validateService(body, editing = false) {
+      const fields = {}
+      const allowed = editing
+        ? ['name', 'description', 'isActive', 'expectedVersion']
+        : ['name', 'description', 'isActive']
+      if (!body || typeof body !== 'object' || Array.isArray(body) ||
+          Object.keys(body).some((key) => !allowed.includes(key))) {
+        return { fields: { form: 'Submit only the permitted service fields.' }, values: {} }
+      }
+      const values = {}
+      for (const [key, maximum] of [['name', 100], ['description', 1000]]) {
+        if (!editing || Object.hasOwn(body, key)) {
+          if (typeof body[key] !== 'string' || !body[key].trim() || body[key].trim().length > maximum) {
+            fields[key] = `Use between 1 and ${maximum} characters.`
+          } else {
+            values[key] = body[key].trim()
+          }
+        }
+      }
+      if (Object.hasOwn(body, 'isActive')) {
+        if (typeof body.isActive !== 'boolean') fields.isActive = 'Use true or false.'
+        else values.isActive = body.isActive
+      } else if (!editing) values.isActive = true
+      if (editing) {
+        if (!Number.isSafeInteger(body.expectedVersion) || body.expectedVersion < 0) {
+          fields.expectedVersion = 'Refresh services before editing.'
+        }
+        if (!['name', 'description', 'isActive'].some((key) => Object.hasOwn(body, key))) {
+          fields.form = 'Provide at least one service field to update.'
+        }
+      }
+      return { fields, values }
+    }
+
+    app.get('/api/admin/services', requireAdmin, async (req, res, next) => {
+      try {
+        if (Object.keys(req.query).some((key) => !['page', 'limit'].includes(key))) {
+          return res.status(400).json({ code: 'INVALID_QUERY', message: 'Only page and limit are supported.' })
+        }
+        const pageText = req.query.page ?? '1'
+        const limitText = req.query.limit ?? '20'
+        const positiveInteger = (value) => typeof value === 'string' && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value))
+        if (!positiveInteger(pageText) || !positiveInteger(limitText) || Number(limitText) > 100 ||
+            !Number.isSafeInteger((Number(pageText) - 1) * Number(limitText))) {
+          return res.status(400).json({ code: 'INVALID_QUERY', message: 'Use a positive page number and a limit of 1–100.' })
+        }
+        const page = Number(pageText)
+        const limit = Number(limitText)
+        const services = await Service.find({}).sort({ name: 1, _id: 1 })
+          .skip((page - 1) * limit).limit(limit + 1).lean()
+        res.json({ services: services.slice(0, limit).map(adminService), page, limit, hasMore: services.length > limit })
+      } catch (error) { next(error) }
+    })
+
+    app.post('/api/admin/services', requireAdmin, async (req, res, next) => {
+      try {
+        const { fields, values } = validateService(req.body)
+        if (Object.keys(fields).length) {
+          return res.status(400).json({ code: 'VALIDATION_FAILED', message: 'Check the service details.', fields })
+        }
+        // A stable internal slug is generated once; renaming does not change it.
+        const prefix = values.name.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 70) || 'service'
+        const service = await Service.create({ ...values, slug: `${prefix}-${randomBytes(12).toString('hex')}` })
+        res.status(201).json({ service: adminService(service) })
+      } catch (error) {
+        if (error.code === 11000) {
+          return res.status(409).json({ code: 'SERVICE_EXISTS', message: 'A service identifier conflicted. Refresh services before trying again.' })
+        }
+        next(error)
+      }
+    })
+
+    app.patch('/api/admin/services/:id', requireAdmin, async (req, res, next) => {
+      try {
+        if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
+          return res.status(404).json({ code: 'NOT_FOUND', message: 'Service not found.' })
+        }
+        const { fields, values } = validateService(req.body, true)
+        if (Object.keys(fields).length) {
+          return res.status(400).json({ code: 'VALIDATION_FAILED', message: 'Check the service details.', fields })
+        }
+        const service = await Service.findOneAndUpdate(
+          { _id: req.params.id, __v: req.body.expectedVersion },
+          { $set: values, $inc: { __v: 1 } },
+          { new: true, runValidators: true },
+        ).lean()
+        if (!service) {
+          const exists = await Service.exists({ _id: req.params.id })
+          return res.status(exists ? 409 : 404).json(exists
+            ? { code: 'SERVICE_CONFLICT', message: 'This service changed. Refresh services before editing again.' }
+            : { code: 'NOT_FOUND', message: 'Service not found.' })
+        }
+        res.json({ service: adminService(service) })
+      } catch (error) { next(error) }
+    })
 
     app.use('/api', (req, res) => {
       res.status(404).json({
@@ -669,36 +704,29 @@ async function startServer() {
         message: 'API route not found.',
       })
     })
-
     app.use((error, req, res, next) => {
       if (res.headersSent) return next(error)
-
       if (error.type === 'entity.parse.failed') {
         return res.status(400).json({
           code: 'INVALID_JSON',
           message: 'The request contains invalid JSON.',
         })
       }
-
       if (error.type === 'entity.too.large') {
         return res.status(413).json({
           code: 'REQUEST_TOO_LARGE',
           message: 'The request is too large.',
         })
       }
-
       const requestId = randomBytes(8).toString('hex')
       console.error(`Request ${requestId} failed (${error.name})`)
-
       res.status(500).json({
         code: 'SERVER_ERROR',
         message: 'Something went wrong. Please try again.',
         requestId,
       })
     })
-
     console.log('MongoDB connected')
-
     app.listen(port, () => {
       console.log(`Sweeplune API running at http://localhost:${port}`)
     })
@@ -708,5 +736,4 @@ async function startServer() {
     process.exitCode = 1
   }
 }
-
 startServer()
