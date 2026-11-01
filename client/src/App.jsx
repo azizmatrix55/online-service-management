@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import logo from './assets/sweeplune-logo.png'
+import './App.css'
 // Interpret booking fields in the provider's zone, never the device's zone.
 const serviceTimeZone = 'Europe/Budapest'
 const budapestPartsFormatter = new Intl.DateTimeFormat('en-GB', {
@@ -126,7 +127,7 @@ function MyBookings({ refreshKey }) {
               <article key={booking.id} className="rounded-xl border border-slate-200 p-5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h3 className="font-semibold">{booking.serviceNameSnapshot}</h3>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-sm capitalize">{booking.status}</span>
+                  <span className={`status-badge status-${booking.status}`}>{booking.status}</span>
                 </div>
                 <p className="mt-3 text-sm text-slate-600">Preferred time: {formatServiceTime(booking.preferredAt)}</p>
                 <p className="mt-2 whitespace-pre-wrap break-words">{booking.address}</p>
@@ -227,6 +228,7 @@ function AdminDashboard({ onBusyChange, disabled }) {
         </div>
         <button type="button" disabled={disabled || loading || Boolean(busyId)} onClick={() => { setMessage(''); setAttempt((value) => value + 1) }} className="rounded-lg border px-4 py-2 disabled:opacity-50">Refresh bookings</button>
       </div>
+      <div className="admin-summary">{[['Requests on this page', result?.bookings.length], ['Pending on this page', result?.bookings.filter((item) => item.status === 'pending').length], ['Confirmed on this page', result?.bookings.filter((item) => item.status === 'confirmed').length]].map(([label,count]) => <div key={label}><span>{label}</span><strong>{loading || !result ? '—' : count}</strong><Icon name="calendar" /></div>)}</div>
       <label htmlFor="admin-status" className="mt-6 block max-w-xs font-medium">
         Filter by status
         <select id="admin-status" value={view.status} disabled={disabled || Boolean(busyId)} onChange={(event) => { setMessage(''); setView({ page: 1, status: event.target.value }) }} className={inputStyle}>
@@ -241,37 +243,9 @@ function AdminDashboard({ onBusyChange, disabled }) {
       {!loading && result && (
         <>
           {result.bookings.length === 0 && <p className="mt-5 text-slate-600">No bookings found on this page.</p>}
-          <div className="mt-5 space-y-5">
-            {result.bookings.map((booking) => (
-              <article key={booking.id} className="rounded-xl border border-slate-200 p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-lg font-semibold">{booking.serviceNameSnapshot}</h3>
-                  <span className="rounded-full bg-teal-50 px-3 py-1 text-sm capitalize text-teal-900">{booking.status}</span>
-                </div>
-                <p className="mt-3">Preferred time: {formatServiceTime(booking.preferredAt)}</p>
-                <p className="mt-2 whitespace-pre-wrap break-words">Address: {booking.address}</p>
-                {booking.notes && <p className="mt-2 whitespace-pre-wrap break-words text-slate-600">Instructions: {booking.notes}</p>}
-                <p className="mt-3 break-all text-xs text-slate-500">Customer ID: {booking.customerId}</p>
-                <p className="mt-1 break-all text-xs text-slate-500">Reference: {booking.id}</p>
-                <div className="mt-4 flex flex-wrap gap-3">
-                  {(actions[booking.status] || []).map((status) => (
-                    <button key={status} type="button" disabled={disabled || Boolean(busyId)} onClick={() => changeStatus(booking, status)} className={`rounded-lg px-4 py-2 font-medium disabled:opacity-50 ${status === 'cancelled' ? 'border border-red-300 text-red-700 hover:bg-red-50' : 'bg-teal-700 text-white hover:bg-teal-800'}`}>
-                      {busyId === booking.id ? 'Updating…' : labels[status]}
-                    </button>
-                  ))}
-                  {!actions[booking.status] && <p className="text-sm text-slate-500">This booking is closed.</p>}
-                </div>
-                {booking.statusHistory?.length > 0 && (
-                  <details className="mt-4 text-sm text-slate-600">
-                    <summary className="cursor-pointer font-medium">Status history</summary>
-                    <ol className="mt-2 space-y-2">
-                      {booking.statusHistory.map((entry, index) => <li key={index} className="capitalize">{entry.status} · {formatServiceTime(entry.changedAt)}</li>)}
-                    </ol>
-                  </details>
-                )}
-              </article>
-            ))}
-          </div>
+          <div className="booking-table-wrap"><table className="booking-table"><caption className="sr-only">Booking requests on page {view.page}</caption><thead><tr><th scope="col">Service / customer</th><th scope="col">Preferred appointment</th><th scope="col">Status</th><th scope="col">Review & actions</th></tr></thead><tbody>
+            {result.bookings.map((booking) => <tr key={booking.id}><td><strong>{booking.serviceNameSnapshot}</strong><small className="record-id">Customer: {booking.customerId}</small><small className="record-id">Ref: {booking.id}</small></td><td><span>{formatServiceTime(booking.preferredAt)}</span><small className="record-address">{booking.address}</small></td><td><span className={`status-badge status-${booking.status}`}>{booking.status}</span></td><td><details className="booking-detail"><summary>View details</summary>{booking.notes && <p className="whitespace-pre-wrap break-words">{booking.notes}</p>}<ol>{booking.statusHistory?.map((entry,index) => <li key={index}>{entry.status} · {formatServiceTime(entry.changedAt)}</li>)}</ol></details><div className="table-actions">{(actions[booking.status] || []).map((status) => <button key={status} type="button" disabled={disabled || Boolean(busyId)} onClick={() => changeStatus(booking,status)} className={status === 'cancelled' ? 'cancel-action' : 'confirm-action'}>{busyId === booking.id ? 'Updating…' : labels[status]}</button>)}{!actions[booking.status] && <small>Booking closed</small>}</div></td></tr>)}
+          </tbody></table></div>
           <div className="mt-6 flex flex-wrap items-center gap-4">
             <button type="button" disabled={disabled || view.page === 1 || Boolean(busyId)} onClick={() => setView((previous) => ({ ...previous, page: previous.page - 1 }))} className="rounded-lg border px-4 py-2 disabled:opacity-40">Previous</button>
             <span>Page {view.page}</span>
@@ -463,7 +437,80 @@ function AdminServices({ disabled, onBusyChange, onCatalogueChange }) {
     </section>
   )
 }
+function Icon({ name = 'spark', size = 20 }) {
+  const paths = {
+    spark: 'm12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z',
+    home: 'm3 10 9-7 9 7v10H3V10Zm6 10v-7h6v7',
+    grid: 'M3 3h7v7H3V3Zm11 0h7v7h-7V3ZM3 14h7v7H3v-7Zm11 0h7v7h-7v-7Z',
+    calendar: 'M5 5h14v16H5V5Zm3-3v6m8-6v6M5 10h14m-10 5h6',
+    user: 'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM4 21v-2a8 8 0 0 1 16 0v2',
+    arrow: 'M4 12h15m-6-6 6 6-6 6',
+    check: 'm5 12 4 4L19 6',
+    clock: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-5v5l3 2',
+  }
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name] || paths.spark} /></svg>
+}
+
+function RoomIllustration() {
+  return (
+    <div className="room-art" aria-hidden="true">
+      <div className="art-label"><span className="live-dot" /> A little more room to relax</div>
+      <svg viewBox="0 0 560 430" role="presentation">
+        <defs>
+          <linearGradient id="wall" x2="0" y2="1"><stop stopColor="#e5eee3"/><stop offset="1" stopColor="#cddfd3"/></linearGradient>
+          <linearGradient id="sofa" x2="0" y2="1"><stop stopColor="#528c79"/><stop offset="1" stopColor="#2b6555"/></linearGradient>
+          <linearGradient id="light"><stop stopColor="#fff9dc" stopOpacity=".8"/><stop offset="1" stopColor="#fff9dc" stopOpacity="0"/></linearGradient>
+        </defs>
+        <path d="M0 0h560v330H0z" fill="url(#wall)"/>
+        <path d="M0 330h560v100H0z" fill="#c4b79c"/>
+        <path d="M0 331h560" stroke="#b4c7b9" strokeWidth="7"/>
+        <path d="m350 110 210 55v220L200 330Z" fill="url(#light)"/>
+        <rect x="324" y="35" width="164" height="199" rx="74" fill="#f5f1db" stroke="#f8faf4" strokeWidth="12"/>
+        <path d="M406 36v196m-80-91h160" stroke="#fbfcf5" strokeWidth="8"/>
+        <path d="M333 190c34-30 76-21 145-65v101H333Z" fill="#a9c2ac"/>
+        <path d="M406 36v196m-80-91h160" stroke="#fbfcf5" strokeWidth="6"/>
+        <ellipse cx="277" cy="368" rx="204" ry="40" fill="#e9e3cc"/>
+        <path d="M103 338v24m245-24v24" stroke="#514a38" strokeWidth="9"/>
+        <rect x="91" y="225" width="270" height="115" rx="25" fill="url(#sofa)"/>
+        <rect x="112" y="210" width="109" height="84" rx="21" fill="#6b9b86"/>
+        <rect x="228" y="210" width="111" height="84" rx="21" fill="#6b9b86"/>
+        <rect x="78" y="266" width="43" height="78" rx="17" fill="#3d7864"/>
+        <rect x="335" y="266" width="43" height="78" rx="17" fill="#3d7864"/>
+        <rect x="121" y="285" width="214" height="43" rx="12" fill="#77a28b"/>
+        <rect x="144" y="236" width="52" height="51" rx="10" fill="#dfca94" transform="rotate(-12 170 260)"/>
+        <path d="M177 242v39m-13-35v37" stroke="#baa779" strokeWidth="2"/>
+        <ellipse cx="366" cy="341" rx="64" ry="19" fill="#e2b880"/>
+        <path d="m328 349-7 45m82-45 7 45" stroke="#846c4d" strokeWidth="7"/>
+        <rect x="358" y="314" width="19" height="22" rx="4" fill="#faf6e8"/>
+        <path d="M377 319c17-3 17 13 0 10" fill="none" stroke="#faf6e8" strokeWidth="4"/>
+        <path d="M457 320c-12-48 15-78 5-140m-4 87c-29-3-39-24-29-45 23 1 34 21 29 45Zm4-39c26-2 39-20 30-41-24 1-35 17-30 41Zm-4 72c-25-2-42-19-36-39 24-2 39 12 36 39Z" fill="#477c58" stroke="#477c58" strokeWidth="3"/>
+        <path d="M432 309h50l-7 52h-35Z" fill="#c68e65"/>
+        <rect x="74" y="63" width="100" height="111" fill="#d9b987"/>
+        <rect x="81" y="70" width="86" height="97" fill="#f5efe1"/>
+        <circle cx="123" cy="107" r="20" fill="#e0bd78"/>
+        <path d="M87 153c31-52 47-40 72 0" fill="#779984"/>
+        <path d="M261 89v22m-11-11h22M504 272v20m-10-10h20" stroke="#fffdf1" strokeWidth="3" strokeLinecap="round"/>
+      </svg>
+      <div className="art-note"><span className="note-icon"><Icon name="check" /></span><div><strong>Your space. A fresh start.</strong><small>Thoughtful cleaning, simply arranged.</small></div></div>
+    </div>
+  )
+}
+
 export default function App() {
+  const [page, setPage] = useState('home')
+  function navigate(next) {
+    if (adminBusy || bookingBusy || authBusy) return
+    setPage(next)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  function followLink(event) {
+    const link = event.target.closest('a[href^="#"]')
+    if (!link) return
+    const routes = { '#': 'home', '#services': 'services', '#booking': 'booking', '#account': 'account', '#my-bookings': 'history', '#admin': 'admin', '#admin-services': 'admin-services' }
+    const next = routes[link.getAttribute('href')]
+    if (next) { event.preventDefault(); navigate(next) }
+  }
+
   const [adminBusy, setAdminBusy] = useState(false)
   const [user, setUser] = useState(null)
   const [bookingBusy, setBookingBusy] = useState(false)
@@ -486,7 +533,7 @@ export default function App() {
       setSessionError('')
       try {
         const data = await accountRequest('/api/auth/me', { signal: controller.signal })
-        if (!controller.signal.aborted) setUser(data.user)
+        if (!controller.signal.aborted) { setUser(data.user); if (data.user.role === 'admin') setPage('admin') }
       } catch (error) {
         if (!controller.signal.aborted) {
           setUser(null)
@@ -542,6 +589,7 @@ export default function App() {
         setAuthMessage('Account created. Sign in with your email and password.')
       } else {
         setUser(data.user)
+        setPage(data.user.role === 'admin' ? 'admin' : 'booking')
         setAuthMessage('You are signed in.')
       }
     } catch (error) {
@@ -564,6 +612,7 @@ export default function App() {
       setBookingError('')
       setForm({ serviceId: '', date: '', time: '', address: '', notes: '' })
       setErrors({})
+      setPage('account')
       setAuthMessage('You have signed out.')
     } catch (error) {
       if (error.status === 401) {
@@ -634,9 +683,7 @@ export default function App() {
     setForm((previous) => ({ ...previous, serviceId }))
     setErrors((previous) => ({ ...previous, serviceId: undefined }))
     setPreview(null)
-    document.getElementById('booking').scrollIntoView({
-      behavior: 'smooth',
-    })
+    navigate('booking')
   }
   async function submitBooking(event) {
     event.preventDefault()
@@ -645,7 +692,7 @@ export default function App() {
     setPreview(null)
     if (!user || user.role !== 'customer') {
       setBookingError('Sign in with a customer account before submitting a booking.')
-      document.getElementById('account').scrollIntoView({ behavior: 'smooth' })
+      setPage('account')
       return
     }
     const nextErrors = {}
@@ -727,45 +774,46 @@ export default function App() {
       'aria-describedby': errors[name] ? `${name}-error` : undefined,
     }
   }
+  const isAdmin = user?.role === 'admin'
+  const busy = adminBusy || bookingBusy || authBusy
+  const navItem = (target, label, icon) => <button type="button" key={target} disabled={busy} onClick={() => navigate(target)} aria-current={page === target ? 'page' : undefined} className={`nav-item ${page === target ? 'active' : ''}`}><Icon name={icon} /><span>{label}</span></button>
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="border-b border-slate-200 bg-white">
-        <nav
-          aria-label="Main navigation"
-          className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-5"
-        >
-          <a href="#" aria-label="Sweeplune home" className="shrink-0">
-                <img src={logo} alt="Sweeplune" className="h-24 w-auto object-contain" />
-          </a>
-          <div className="flex flex-wrap gap-6 text-sm font-medium">
-            <a href="#account" className="hover:text-teal-700">{user ? 'My account' : 'Sign in / Register'}</a>
-            {user?.role === 'customer' && <a href="#my-bookings" className="hover:text-teal-700">My Bookings</a>}
-            {user?.role === 'admin' && <a href="#admin" className="hover:text-teal-700">Admin dashboard</a>}
-            {user?.role === 'admin' && <a href="#admin-services" className="hover:text-teal-700">Manage services</a>}
-            <a href="#services" className="hover:text-teal-700">
-              Services
-            </a>
-            <a href="#booking" className="hover:text-teal-700">
-              Request cleaning
-            </a>
-          </div>
-        </nav>
-      </header>
-      <main className="mx-auto max-w-6xl px-6 py-12">
-        <section className="max-w-2xl">
-          <p className="text-sm font-semibold uppercase tracking-widest text-teal-700">
-            A cleaner space starts here
-          </p>
-          <h1 className="mt-4 text-4xl font-bold tracking-tight sm:text-5xl">
-            Cleaning that fits your space.
-          </h1>
-          <p className="mt-5 text-lg leading-8 text-slate-600">
-            Explore our services and request your preferred cleaning time.
-            Availability is confirmed after your request is reviewed.
-          </p>
-        </section>
+    <div className={`sweeplune-app ${isAdmin ? 'admin-layout' : ''}`} onClick={followLink}>
+      <a className="skip-link" href="#main-content" onClick={(event) => { event.preventDefault(); document.getElementById('main-content')?.focus() }}>Skip to content</a>
+      {isAdmin ? (
+        <aside className="admin-sidebar">
+          <a href="#admin" className="brand"><img src={logo} alt="" /><span>Sweeplune<small>MANAGEMENT STUDIO</small></span></a>
+          <p className="sidebar-label">WORKSPACE</p>
+          <nav aria-label="Admin navigation">
+            {navItem('admin', 'Bookings', 'calendar')}
+            {navItem('admin-services', 'Services', 'grid')}
+            {navItem('services', 'View catalogue', 'home')}
+            {navItem('account', 'My account', 'user')}
+          </nav>
+          <div className="sidebar-note"><Icon name="spark" size={26} /><strong>A little order.<br />A lot more clarity.</strong><p>Manage services and keep every request moving.</p></div>
+          <div className="sidebar-profile"><span className="avatar">{user.name?.slice(0,1).toUpperCase()}</span><div><strong>{user.name}</strong><small>Administrator</small></div></div>
+        </aside>
+      ) : (
+        <header className="site-header">
+          <a href="#" className="brand"><img src={logo} alt="" /><span>Sweeplune<small>A LITTLE CLEANER. A LITTLE CALMER.</small></span></a>
+          <nav aria-label="Main navigation">{navItem('home', 'Home', 'home')}{navItem('services', 'Services', 'grid')}{user?.role === 'customer' && navItem('history', 'My bookings', 'calendar')}</nav>
+          <div className="header-actions"><button type="button" disabled={busy} onClick={() => navigate('account')} className="account-link"><Icon name="user" />{user ? user.name.split(' ')[0] : 'Sign in'}</button><button type="button" disabled={busy} onClick={() => navigate('booking')} className="primary-button">Book a clean <Icon name="arrow" size={17} /></button></div>
+        </header>
+      )}
+      <main id="main-content" tabIndex={-1} className="app-main">
+        {isAdmin && <div className="workspace-top"><span>Workspace <span className="breadcrumb-divider">/</span> {page === 'admin' ? 'Bookings' : page === 'admin-services' ? 'Services' : page === 'account' ? 'Account' : 'Catalogue'}</span><span className="timezone-label"><Icon name="clock" size={16} /> Budapest time</span></div>}
+        {checkingSession && <p role="status" className="session-banner">Checking your session…</p>}
+        {sessionError && page !== 'account' && <p role="alert" className="session-banner">{sessionError} <a href="#account">Try again</a></p>}
+        <div hidden={page !== 'home' || isAdmin}>
+          <section className="home-hero">
+            <div className="hero-copy"><p className="eyebrow"><span className="live-dot" /> CLEANING, WITH A PERSONAL TOUCH</p><h1>A cleaner home.<br />A <em>lighter</em> day.</h1><p className="hero-description">Leave the cleaning on your to-do list to us. Find your service, request a time, and get back to what matters.</p><div className="hero-actions"><a href="#booking" className="primary-button">Find your fresh start <Icon name="arrow" /></a><a href="#services" className="text-link">Explore services ↗</a></div><div className="hero-points"><span><Icon name="check" size={16} /> Simple booking</span><span><Icon name="check" size={16} /> Clear status updates</span></div></div>
+            <RoomIllustration />
+          </section>
+          <div className="process-strip"><div><span>01</span><p><strong>Choose your clean</strong><small>Find the right fit for your space.</small></p></div><div><span>02</span><p><strong>Make a request</strong><small>Pick a preferred date and time.</small></p></div><div><span>03</span><p><strong>We confirm the details</strong><small>Track updates in your account.</small></p></div></div>
+        </div>
+        <div hidden={page !== 'account'} className="account-layout"><div className="account-intro"><p className="eyebrow">WELCOME HOME</p><h1>A little less<br />on your list.</h1><p>Your next clean and every booking update, all in one place.</p><div className="account-emblem"><img src={logo} alt="Sweeplune" /></div></div>
         <section id="account" className="mt-14 scroll-mt-6 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
-          <h2 className="text-2xl font-bold">{user ? 'Your account' : 'Welcome to Sweeplune'}</h2>
+          <p className="eyebrow">Your Sweeplune space</p><h2 className="text-2xl font-bold">{user ? 'Your account' : 'Welcome to Sweeplune'}</h2>
           {checkingSession ? (
             <p role="status" className="mt-4 text-slate-600">Checking your session…</p>
           ) : sessionError ? (
@@ -808,10 +856,12 @@ export default function App() {
           {authError && <p role="alert" className="mt-4 text-red-700">{authError}</p>}
           {authMessage && <p role="status" className="mt-4 text-teal-800">{authMessage}</p>}
         </section>
-        {user?.role === 'admin' && <AdminDashboard key={`bookings-${user.id}`} onBusyChange={setAdminBusy} disabled={adminBusy || authBusy} />}
-        {user?.role === 'admin' && <AdminServices key={`services-${user.id}`} onBusyChange={setAdminBusy} disabled={adminBusy || authBusy} onCatalogueChange={() => setCatalogueAttempt((value) => value + 1)} />}
+        </div>
+        {isAdmin && <div hidden={page !== 'admin'}><AdminDashboard key={`bookings-${user.id}`} onBusyChange={setAdminBusy} disabled={adminBusy || authBusy} /></div>}
+        {isAdmin && <div hidden={page !== 'admin-services'}><AdminServices key={`services-${user.id}`} onBusyChange={setAdminBusy} disabled={adminBusy || authBusy} onCatalogueChange={() => setCatalogueAttempt((value) => value + 1)} /></div>}
+        <div hidden={!['home', 'services'].includes(page)}>
         <section id="services" className="mt-14 scroll-mt-6">
-          <h2 className="text-2xl font-bold">Our services</h2>
+          <div className="section-heading"><div><p className="eyebrow">A clean for every space</p><h2>What can we help with?</h2></div><p>Everyday upkeep or a fresh start.<br />Choose the service that fits.</p></div>
           {loadingServices && (
             <p role="status" className="mt-4 text-slate-600">Loading services…</p>
           )}
@@ -834,9 +884,9 @@ export default function App() {
             {services.map((service) => (
               <article
                 key={service.id}
-                className="flex flex-col rounded-2xl border border-slate-200 bg-white p-6"
+                className="service-card"
               >
-                <h3 className="text-xl font-semibold">{service.name}</h3>
+                <div className="service-symbol"><Icon name={service.name.toLowerCase().includes('office') ? 'grid' : service.name.toLowerCase().includes('deep') ? 'spark' : 'home'} size={28} /></div><h3 className="text-xl font-semibold">{service.name}</h3>
                 <p className="mt-3 flex-1 leading-7 text-slate-600">
                   {service.description}
                 </p>
@@ -845,17 +895,19 @@ export default function App() {
                   onClick={() => selectService(service.id)}
                   className="mt-6 rounded-xl bg-teal-700 px-4 py-3 font-medium text-white hover:bg-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
                 >
-                  Select service
+                  Choose this service ↗
                 </button>
               </article>
             ))}
           </div>
         </section>
+        </div>
+        <div hidden={page !== 'booking'} className="booking-layout"><aside className="booking-guide"><p className="eyebrow">YOUR NEXT CLEAN</p><h1>Let's make<br />space for you.</h1><p>Tell us what you need. We'll review your request and confirm availability.</p><ol><li><span>1</span> Choose your service</li><li><span>2</span> Share the details</li><li><span>3</span> Receive confirmation</li></ol><div className="booking-timezone"><Icon name="clock" /><div><strong>One place. One time zone.</strong><p>All appointments use Budapest time, wherever you book from.</p></div></div></aside>
         <section
           id="booking"
           className="mt-14 scroll-mt-6 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8"
         >
-          <h2 className="text-2xl font-bold">Request a cleaning</h2>
+          <p className="eyebrow">Make room for a fresh start</p><h2 className="text-2xl font-bold">Request your cleaning</h2>
           <p className="mt-2 text-slate-600">
             Your preferred time is a request, not a confirmed appointment.
           </p>
@@ -1002,11 +1054,11 @@ export default function App() {
             </div>
           )}
         </section>
-        {user?.role === 'customer' && <MyBookings key={user.id} refreshKey={bookingsRefresh} />}
+        </div>
+        {user?.role === 'customer' && <div hidden={page !== 'history'}><div className="page-heading"><p className="eyebrow">YOUR CLEANING JOURNEY</p><h1>A little peace of mind.</h1><p>Follow your requests from the first hello to the final clean.</p></div><MyBookings key={user.id} refreshKey={bookingsRefresh} /></div>}
+        {page === 'home' && !isAdmin && <section className="closing-banner"><Icon name="spark" size={34} /><div><h2>Less cleaning. More living.</h2><p>Make your next fresh start a simple one.</p></div><a href="#booking" className="primary-button">Request a cleaning <Icon name="arrow" /></a></section>}
       </main>
-      <footer className="border-t border-slate-200 px-6 py-6 text-center text-sm text-slate-500">
-        Sweeplune · Cleaning service booking and management
-      </footer>
+      <footer className="site-footer"><strong>Sweeplune</strong><p>Fresh spaces. Lighter days.</p><span>Cleaning services · Budapest</span></footer>
     </div>
   )
 }

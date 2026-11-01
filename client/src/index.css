@@ -1,1 +1,16 @@
 @import "tailwindcss";
+
+:root { font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; color: #193f39; background: #fafbf8; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 0; }
+button, input, select, textarea { font: inherit; }
+button, a, summary { -webkit-tap-highlight-color: transparent; }
+button, summary { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .5; }
+button, a, input, select, textarea, summary { outline-offset: 4px; }
+:focus-visible { outline: 3px solid #358b72; }
+[hidden] { display: none !important; }
+input, select, textarea { max-width: 100%; }
+textarea { resize: vertical; }
+::selection { background: #c6e6d4; color: #103f34; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }
