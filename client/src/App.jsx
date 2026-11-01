@@ -1,5 +1,65 @@
 import { useEffect, useRef, useState } from 'react'
 import logo from './assets/sweeplune-logo.png'
+// Interpret booking fields in the provider's zone, never the device's zone.
+const serviceTimeZone = 'Europe/Budapest'
+const budapestPartsFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: serviceTimeZone, calendar: 'gregory', numberingSystem: 'latn',
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+})
+const budapestDisplayFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: serviceTimeZone, year: 'numeric', month: 'short', day: 'numeric',
+  hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short',
+})
+
+function formatServiceTime(value) {
+  const instant = new Date(value)
+  return Number.isFinite(instant.getTime())
+    ? `${budapestDisplayFormatter.format(instant)} (Budapest)`
+    : 'Time unavailable'
+}
+
+function budapestWallTime(instant) {
+  const parts = Object.fromEntries(budapestPartsFormatter.formatToParts(instant)
+    .filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]))
+  // setUTCFullYear avoids Date.UTC's special treatment of years 0–99.
+  const wall = new Date(0)
+  wall.setUTCFullYear(parts.year, parts.month - 1, parts.day)
+  wall.setUTCHours(parts.hour, parts.minute, parts.second, 0)
+  return wall.getTime()
+}
+
+function parseServiceTime(dateText, timeText) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !/^\d{2}:\d{2}$/.test(timeText)) {
+    return { error: 'Enter a valid date and time in Budapest.' }
+  }
+  const [year, month, day] = dateText.split('-').map(Number)
+  const [hour, minute] = timeText.split(':').map(Number)
+  const wall = new Date(0)
+  wall.setUTCFullYear(year, month - 1, day)
+  wall.setUTCHours(hour, minute, 0, 0)
+  if (year < 1 || wall.getUTCFullYear() !== year || wall.getUTCMonth() !== month - 1 ||
+      wall.getUTCDate() !== day || wall.getUTCHours() !== hour || wall.getUTCMinutes() !== minute) {
+    return { error: 'Enter a valid calendar date and time.' }
+  }
+  const target = wall.getTime()
+  // Sample both sides of Budapest's clock change to collect possible offsets.
+  const offsets = new Set()
+  for (let hours = -36; hours <= 36; hours += 6) {
+    const sample = target + hours * 60 * 60 * 1000
+    offsets.add(budapestWallTime(sample) - sample)
+  }
+  const candidates = [...offsets].map((offset) => target - offset)
+    .filter((candidate) => budapestWallTime(candidate) === target)
+  if (candidates.length === 0) {
+    return { error: 'This time does not exist in Budapest because the clocks move forward. Choose another time.' }
+  }
+  if (candidates.length !== 1) {
+    return { error: 'This time occurs twice in Budapest because the clocks move back. Choose another time outside the repeated hour.' }
+  }
+  return { instant: new Date(candidates[0]) }
+}
+
 const inputStyle =
   'mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 focus:border-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-600/20'
 async function accountRequest(path, options = {}) {
@@ -68,7 +128,7 @@ function MyBookings({ refreshKey }) {
                   <h3 className="font-semibold">{booking.serviceNameSnapshot}</h3>
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-sm capitalize">{booking.status}</span>
                 </div>
-                <p className="mt-3 text-sm text-slate-600">Preferred time: {new Date(booking.preferredAt).toLocaleString()}</p>
+                <p className="mt-3 text-sm text-slate-600">Preferred time: {formatServiceTime(booking.preferredAt)}</p>
                 <p className="mt-2 whitespace-pre-wrap break-words">{booking.address}</p>
                 {booking.notes && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-600">Instructions: {booking.notes}</p>}
                 <p className="mt-3 break-all text-xs text-slate-500">Reference: {booking.id}</p>
@@ -174,7 +234,7 @@ function AdminDashboard({ onBusyChange, disabled }) {
           {['pending', 'confirmed', 'completed', 'cancelled'].map((status) => <option key={status} value={status}>{status[0].toUpperCase() + status.slice(1)}</option>)}
         </select>
       </label>
-      <p className="mt-3 text-sm text-slate-500">All times below use your device’s local time zone.</p>
+      <p className="mt-3 text-sm text-slate-500">All times below are shown in Budapest time (Europe/Budapest).</p>
       {message && <p role="status" className="mt-4 rounded-lg bg-teal-50 p-3 break-words text-teal-800">{message}</p>}
       {error && <p role="alert" className="mt-4 text-red-700">{error}</p>}
       {loading && <p role="status" className="mt-4">Loading bookings…</p>}
@@ -188,7 +248,7 @@ function AdminDashboard({ onBusyChange, disabled }) {
                   <h3 className="text-lg font-semibold">{booking.serviceNameSnapshot}</h3>
                   <span className="rounded-full bg-teal-50 px-3 py-1 text-sm capitalize text-teal-900">{booking.status}</span>
                 </div>
-                <p className="mt-3">Preferred time: {new Date(booking.preferredAt).toLocaleString()}</p>
+                <p className="mt-3">Preferred time: {formatServiceTime(booking.preferredAt)}</p>
                 <p className="mt-2 whitespace-pre-wrap break-words">Address: {booking.address}</p>
                 {booking.notes && <p className="mt-2 whitespace-pre-wrap break-words text-slate-600">Instructions: {booking.notes}</p>}
                 <p className="mt-3 break-all text-xs text-slate-500">Customer ID: {booking.customerId}</p>
@@ -205,7 +265,7 @@ function AdminDashboard({ onBusyChange, disabled }) {
                   <details className="mt-4 text-sm text-slate-600">
                     <summary className="cursor-pointer font-medium">Status history</summary>
                     <ol className="mt-2 space-y-2">
-                      {booking.statusHistory.map((entry, index) => <li key={index} className="capitalize">{entry.status} · {new Date(entry.changedAt).toLocaleString()}</li>)}
+                      {booking.statusHistory.map((entry, index) => <li key={index} className="capitalize">{entry.status} · {formatServiceTime(entry.changedAt)}</li>)}
                     </ol>
                   </details>
                 )}
@@ -238,12 +298,10 @@ function AdminServices({ disabled, onBusyChange, onCatalogueChange }) {
   const updating = useRef(false)
   const mounted = useRef(false)
   const editor = useRef(null)
-
   useEffect(() => {
     mounted.current = true
     return () => { mounted.current = false }
   }, [])
-
   useEffect(() => {
     const controller = new AbortController()
     async function load() {
@@ -265,19 +323,16 @@ function AdminServices({ disabled, onBusyChange, onCatalogueChange }) {
     load()
     return () => controller.abort()
   }, [page, attempt])
-
   function accessMessage(failure) {
     return failure.status === 401 ? 'Your session expired. Sign out and sign in again.'
       : failure.status === 403 ? 'Administrator access is required. If your session expired, sign out and sign in again.'
       : failure.message || 'Unable to load services. Please try again.'
   }
-
   function resetEditor() {
     setEditing(null)
     setForm(emptyForm)
     setFields({})
   }
-
   function refresh() {
     if (disabled || updating.current) return
     resetEditor()
@@ -286,7 +341,6 @@ function AdminServices({ disabled, onBusyChange, onCatalogueChange }) {
     setAttempt((value) => value + 1)
     onCatalogueChange()
   }
-
   function edit(service) {
     if (disabled || loading || updating.current || needsRefresh) return
     setEditing({ id: service.id, version: service.version })
@@ -296,13 +350,11 @@ function AdminServices({ disabled, onBusyChange, onCatalogueChange }) {
     setMessage('')
     editor.current?.focus()
   }
-
   function updateField(event) {
     const { name, value, checked, type } = event.target
     setForm((previous) => ({ ...previous, [name]: type === 'checkbox' ? checked : value }))
     setFields((previous) => ({ ...previous, [name]: undefined }))
   }
-
   async function saveService(event) {
     event.preventDefault()
     if (disabled || loading || updating.current || needsRefresh) return
@@ -346,7 +398,6 @@ function AdminServices({ disabled, onBusyChange, onCatalogueChange }) {
       }
     }
   }
-
   const locked = disabled || busy || loading
   return (
     <section id="admin-services" className="mt-10 scroll-mt-6 rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
@@ -412,7 +463,6 @@ function AdminServices({ disabled, onBusyChange, onCatalogueChange }) {
     </section>
   )
 }
-
 export default function App() {
   const [adminBusy, setAdminBusy] = useState(false)
   const [user, setUser] = useState(null)
@@ -602,19 +652,18 @@ export default function App() {
     const selectedService = services.find(
       (service) => service.id === form.serviceId,
     )
-    const preferredAt = new Date(`${form.date}T${form.time}`)
+    const parsedTime = parseServiceTime(form.date, form.time)
+    const preferredAt = parsedTime.instant
     if (!selectedService) {
       nextErrors.serviceId = 'Please select a service.'
     }
     if (!form.date) nextErrors.date = 'Please choose a date.'
     if (!form.time) nextErrors.time = 'Please choose a time.'
-    if (
-      form.date &&
-      form.time &&
-      (Number.isNaN(preferredAt.getTime()) ||
-        preferredAt.getTime() <= Date.now())
-    ) {
-      nextErrors.date = 'Choose a future date and time.'
+    if (form.date && form.time) {
+      if (parsedTime.error) nextErrors.time = parsedTime.error
+      else if (preferredAt.getTime() <= Date.now()) {
+        nextErrors.date = 'Choose a future date and time in Budapest.'
+      }
     }
     if (!form.address.trim()) {
       nextErrors.address = 'Please enter the cleaning address.'
@@ -642,7 +691,7 @@ export default function App() {
       setPreview({
         id: data.booking.id,
         service: data.booking.serviceNameSnapshot,
-        preferredAt: new Date(data.booking.preferredAt).toLocaleString(),
+        preferredAt: formatServiceTime(data.booking.preferredAt),
         address: data.booking.address,
         notes: data.booking.notes,
       })
@@ -812,7 +861,7 @@ export default function App() {
           </p>
           <p className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
             Requests are saved as pending and require administrator confirmation.
-            Dates and times use your device’s local time zone.
+            Enter dates and times in Budapest time (Europe/Budapest), regardless of your device’s time zone.
             {!user && <> <a href="#account" className="font-semibold underline">Sign in</a> to submit a request.</>}
           </p>
           {bookingError && <p role="alert" className="mt-4 text-red-700">{bookingError}</p>}
@@ -845,7 +894,7 @@ export default function App() {
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
                 <label htmlFor="date" className="font-medium">
-                  Preferred date
+                  Preferred date (Budapest)
                 </label>
                 <input
                   id="date"
@@ -861,7 +910,7 @@ export default function App() {
               </div>
               <div>
                 <label htmlFor="time" className="font-medium">
-                  Preferred time
+                  Preferred time (Budapest)
                 </label>
                 <input
                   id="time"
