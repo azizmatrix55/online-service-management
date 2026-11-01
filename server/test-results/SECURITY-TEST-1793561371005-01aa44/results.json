@@ -1,0 +1,27 @@
+{
+  "marker": "SECURITY-TEST-1793561371005-01aa44",
+  "startedAt": "2026-11-01T19:29:31.004Z",
+  "baseUrl": "http://localhost:3000",
+  "appOrigin": "http://localhost:5173",
+  "environment": {
+    "node": "v24.19.0",
+    "platform": "win32"
+  },
+  "scope": "HTTP integration checks; not a complete penetration test or performance benchmark.",
+  "tests": [],
+  "fixtures": {
+    "serviceId": "6ae7931b9063fc111c94f04a",
+    "customerId": "6ae7931b9063fc111c94f049",
+    "bookingIds": []
+  },
+  "cleanup": [
+    "Could not verify test service deactivation; check the fixture service ID manually."
+  ],
+  "error": "fetch failed",
+  "finishedAt": "2026-11-01T19:29:31.314Z",
+  "summary": {
+    "passed": 0,
+    "failed": 0,
+    "aborted": true
+  }
+}
